@@ -17,11 +17,34 @@ Helper functions for OCR, STT, translation, and common operations.
 # - post_process_ocr_text(): Clean and format OCR output
 # - validate_ocr_result(): Validate OCR accuracy
 
-# TODO: Speech-to-Text Utilities
-# - setup_whisper(): Configure Whisper model
-# - preprocess_audio(): Prepare audio for transcription
-# - post_process_transcript(): Clean and format transcript
-# - validate_transcription(): Validate transcription quality
+import whisper
+import torch
+from pathlib import Path
+
+# Choose device (CUDA if available, else CPU)
+DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+
+# Load model once globally for efficiency
+# You can change model size: "tiny", "small", "base", "medium", "large"
+model = whisper.load_model("base", device=DEVICE)
+
+def transcribe_audio(file_path: str) -> str:
+    """
+    Transcribe audio file to text using Whisper.
+    
+    Args:
+        file_path (str): Path to the audio file
+    
+    Returns:
+        str: Transcribed text
+    """
+    if not Path(file_path).exists():
+        raise FileNotFoundError(f"Audio file not found: {file_path}")
+    
+    result = model.transcribe(file_path)
+    return result["text"]
+
+
 
 # TODO: Translation Utilities
 # - setup_translation_model(): Configure translation model
