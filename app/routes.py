@@ -2,8 +2,8 @@
 API routes for LearnADo application.
 All endpoints for file upload, processing, and retrieval.
 """
-from fastapi import APIRouter, UploadFile, File, HTTPException
-from app.utils import transcribe_audio
+from fastapi import APIRouter, UploadFile, File, HTTPException, Form
+from app.utils import transcribe_audio, query_pdf, process_image, query_audio
 from pathlib import Path
 import shutil
 
@@ -31,11 +31,57 @@ async def transcribe(file: UploadFile = File(...)):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# TODO: Import FastAPI components
-# from fastapi import APIRouter, UploadFile, File, HTTPException, Depends
-# from fastapi.responses import FileResponse
-# from typing import List
-# import os
+# --- PDF Q&A ---
+@router.post("/pdf-query")
+async def pdf_query(file: UploadFile = File(...), question: str = Form(...)):
+    """
+    Upload a PDF and ask a question about it.
+    """
+    try:
+        file_path = UPLOAD_DIR / file.filename
+        with open(file_path, "wb") as f:
+            shutil.copyfileobj(file.file, f)
+        
+        answer = query_pdf(str(file_path), question)
+        return {"filename": file.filename, "question": question, "answer": answer}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# --- IMAGE Q&A ---
+@router.post("/image-query")
+async def image_query(
+    file: UploadFile = File(...),
+    query: str = Form("Describe this image")
+):
+    """
+    Upload an image → OCR with Tesseract → send text+image to Gemini.
+    """
+    try:
+        file_path = UPLOAD_DIR / file.filename
+        with open(file_path, "wb") as f:
+            shutil.copyfileobj(file.file, f)
+
+        response = process_image(str(file_path), query)
+        return {"filename": file.filename, "query": query, "response": response}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# --- AUDIO Q&A ---
+@router.post("/audio-query")
+async def audio_query(file: UploadFile = File(...), question: str = Form(...)):
+    """
+    Upload audio → Whisper transcription → ask Gemini about it.
+    """
+    try:
+        file_path = UPLOAD_DIR / file.filename
+        with open(file_path, "wb") as f:
+            shutil.copyfileobj(file.file, f)
+
+        answer = query_audio(str(file_path), question)
+        return {"filename": file.filename, "question": question, "answer": answer}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 # TODO: Import local modules
 # from app.schemas import *

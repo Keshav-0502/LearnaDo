@@ -11,15 +11,83 @@ Helper functions for OCR, STT, translation, and common operations.
 # import hashlib
 # import mimetypes
 
-# TODO: OCR Utilities
-# - setup_tesseract(): Configure Tesseract OCR
-# - preprocess_image_for_ocr(): Prepare image for better OCR results
-# - post_process_ocr_text(): Clean and format OCR output
-# - validate_ocr_result(): Validate OCR accuracy
-
+import io
+import pymupdf
+import pytesseract
+from PIL import Image
+from dotenv import load_dotenv
+from langchain_google_genai import ChatGoogleGenerativeAI
 import whisper
 import torch
 from pathlib import Path
+
+load_dotenv()
+
+# Initialize Gemini LLM
+llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash")
+
+def extract_text_from_pdf(pdf_path: str) -> str:
+    """
+    Extract text from a PDF. Falls back to OCR if page is image-only.
+    """
+    doc = pymupdf.open(pdf_path)
+    text = ""
+    for page in doc:
+        page_text = page.get_text()
+        if page_text.strip():
+            text += page_text
+        else:
+            # Fallback to OCR
+            pix = page.get_pixmap()
+            img = Image.open(io.BytesIO(pix.tobytes("png")))
+            text += pytesseract.image_to_string(img)
+    return text
+
+def process_image(file_path: str, user_query: str) -> str:
+    """
+    Extract text with Tesseract, send both extracted text and image to Gemini.
+    """
+    if not Path(file_path).exists():
+        raise FileNotFoundError(f"Image file not found: {file_path}")
+
+    try:
+        # OCR with Tesseract
+        extracted_text = pytesseract.image_to_string(Image.open(file_path))
+
+        # Send both to Gemini (multimodal input: text + image)
+        response = llm.invoke([
+            {"role": "user", "content": [
+                {"type": "text", "text": f"User query: {user_query}\n\nExtracted text (OCR): {extracted_text}"},
+                {"type": "image_url", "image_url": f"file://{file_path}"}
+            ]}
+        ])
+        return response.content
+    except Exception as e:
+        raise RuntimeError(f"Error processing image: {e}")
+
+def query_audio(file_path: str, question: str) -> str:
+    """
+    Transcribe audio with Whisper, then send transcription + question to Gemini.
+    """
+    if not Path(file_path).exists():
+        raise FileNotFoundError(f"Audio file not found: {file_path}")
+
+    try:
+        transcription = model.transcribe(file_path)["text"]
+        response = llm.invoke(
+            f"User question: {question}\n\nTranscribed audio:\n{transcription}"
+        )
+        return response.content
+    except Exception as e:
+        raise RuntimeError(f"Error processing audio: {e}")
+
+def query_pdf(pdf_path: str, question: str) -> str:
+    """
+    Ask a question about the contents of a PDF.
+    """
+    content = extract_text_from_pdf(pdf_path)
+    res = llm.invoke(question + "\n\n" + content)
+    return res.content
 
 # Choose device (CUDA if available, else CPU)
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
