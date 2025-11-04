@@ -12,6 +12,7 @@ Helper functions for OCR, STT, translation, and common operations.
 # import mimetypes
 
 import io
+import os
 import pymupdf
 import pytesseract
 from PIL import Image
@@ -23,8 +24,21 @@ from pathlib import Path
 
 load_dotenv()
 
-# Initialize Gemini LLM
-llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash")
+# Initialize Gemini LLM lazily
+_llm = None
+
+def get_llm():
+    """Get or initialize the Gemini LLM instance."""
+    global _llm
+    if _llm is None:
+        google_api_key = os.getenv("GOOGLE_API_KEY")
+        if not google_api_key:
+            raise ValueError(
+                "GOOGLE_API_KEY not found in environment variables. "
+                "Please set it in your .env file or environment."
+            )
+        _llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", google_api_key=google_api_key)
+    return _llm
 
 def extract_text_from_pdf(pdf_path: str) -> str:
     """
@@ -55,6 +69,7 @@ def process_image(file_path: str, user_query: str) -> str:
         extracted_text = pytesseract.image_to_string(Image.open(file_path))
 
         # Send both to Gemini (multimodal input: text + image)
+        llm = get_llm()
         response = llm.invoke([
             {"role": "user", "content": [
                 {"type": "text", "text": f"User query: {user_query}\n\nExtracted text (OCR): {extracted_text}"},
@@ -73,7 +88,9 @@ def query_audio(file_path: str, question: str) -> str:
         raise FileNotFoundError(f"Audio file not found: {file_path}")
 
     try:
+        model = get_whisper_model()
         transcription = model.transcribe(file_path)["text"]
+        llm = get_llm()
         response = llm.invoke(
             f"User question: {question}\n\nTranscribed audio:\n{transcription}"
         )
@@ -86,28 +103,37 @@ def query_pdf(pdf_path: str, question: str) -> str:
     Ask a question about the contents of a PDF.
     """
     content = extract_text_from_pdf(pdf_path)
+    llm = get_llm()
     res = llm.invoke(question + "\n\n" + content)
     return res.content
 
 # Choose device (CUDA if available, else CPU)
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
+# Lazy initialization for Whisper model
+_whisper_model = None
 
-model = whisper.load_model("base", device=DEVICE)
+def get_whisper_model():
+    """Get or initialize the Whisper model instance."""
+    global _whisper_model
+    if _whisper_model is None:
+        _whisper_model = whisper.load_model("base", device=DEVICE)
+    return _whisper_model
 
 def transcribe_audio(file_path: str) -> str:
     """
     Transcribe audio file to text using Whisper.
-    
+
     Args:
         file_path (str): Path to the audio file
-    
+
     Returns:
         str: Transcribed text
     """
     if not Path(file_path).exists():
         raise FileNotFoundError(f"Audio file not found: {file_path}")
-    
+
+    model = get_whisper_model()
     result = model.transcribe(file_path)
     return result["text"]
 
