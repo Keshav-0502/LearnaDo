@@ -92,8 +92,7 @@ def query_pdf(pdf_path: str, question: str) -> str:
 # Choose device (CUDA if available, else CPU)
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
-# Load model once globally for efficiency
-# You can change model size: "tiny", "small", "base", "medium", "large"
+
 model = whisper.load_model("base", device=DEVICE)
 
 def transcribe_audio(file_path: str) -> str:
