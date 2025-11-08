@@ -92,7 +92,7 @@ def source_harvester(state: AgentState):
     if not outline:
         return {"error": "No outline available for harvesting sources"}
 
-    tavily_api_key = os.getenv("TAVILY_API_KEY", "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")
+    tavily_api_key = os.getenv("TAVILY_API_KEY")
     tavily_client = TavilyClient(tavily_api_key)
 
     all_facts = {}

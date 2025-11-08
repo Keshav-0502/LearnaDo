@@ -174,3 +174,5 @@ data/processed/
 # Temporary files
 *.tmp
 *.temp
+
+websearch_logs.json
