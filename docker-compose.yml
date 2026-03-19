@@ -1,0 +1,21 @@
+services:
+  learnado-db:
+    image: postgres:16
+    container_name: learnado-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: learnado
+      POSTGRES_PASSWORD: learnado_secret
+      POSTGRES_DB: learnado
+    ports:
+      - "5433:5432"
+    volumes:
+      - learnado_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U learnado -d learnado"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  learnado_pgdata:

@@ -1,14 +1,30 @@
-from tavily import TavilyClient
 import json
 import os
-from datetime import datetime
-from typing import Annotated, Any, TypedDict
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from langchain_google_genai import ChatGoogleGenerativeAI
-from langgraph.graph import START, END, StateGraph
+from datetime import datetime
+from typing import TypedDict
+
 from dotenv import load_dotenv
+from langchain_google_genai import ChatGoogleGenerativeAI
+from langgraph.graph import END, START, StateGraph
+from tavily import TavilyClient
 
 load_dotenv()
+
+
+def _get_gemini_api_key() -> str:
+    """Prefer app config so webhook can use GEMINI_API_KEY or GOOGLE_API_KEY."""
+    try:
+        from app.config import settings
+        key = settings.gemini_api_key or settings.google_api_key
+        if key:
+            return key
+    except Exception:
+        pass
+    key = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
+    if not key:
+        raise ValueError("GOOGLE_API_KEY or GEMINI_API_KEY not set")
+    return key
 
 
 
@@ -23,7 +39,7 @@ class AgentState(TypedDict):
     current_lesson_index: int | None  # NEW: Track which lesson to generate
     synthesized_lessons: list[dict[str, str]] | None
     current_lesson: dict[str, str] | None  # NEW: The lesson being delivered
-    error: str | None 
+    error: str | None
 
 
 # class ModuleDesign(TypedDict):
@@ -56,7 +72,8 @@ Generate the outline now:"""
         response = tool_llm.invoke(prompt)
 
         # Extract JSON from response
-        content = response.content.strip()
+        raw = response.content
+        content = (raw if isinstance(raw, str) else str(raw)).strip()
 
         # Remove markdown code blocks if present
         if content.startswith("```"):
@@ -157,21 +174,55 @@ def get_tool_llm():
     """Get or initialize the tool LLM instance."""
     global _tool_llm
     if _tool_llm is None:
-        api_key = os.getenv("GOOGLE_API_KEY")
-        if not api_key:
-            raise ValueError("GOOGLE_API_KEY not found in environment variables")
-        _tool_llm = ChatGoogleGenerativeAI(model="gemini-2.5-pro", google_api_key=api_key)
+        api_key = _get_gemini_api_key()
+        # 2026 recommendation: Gemini 2.5 Flash for low-latency/high-volume tasks.
+        _tool_llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", google_api_key=api_key)
     return _tool_llm
+
 
 def get_main_llm():
     """Get or initialize the main LLM instance."""
     global _main_llm
     if _main_llm is None:
-        api_key = os.getenv("GOOGLE_API_KEY")
-        if not api_key:
-            raise ValueError("GOOGLE_API_KEY not found in environment variables")
+        api_key = _get_gemini_api_key()
         _main_llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", google_api_key=api_key)
     return _main_llm
+
+
+def generate_outline_from_topic(topic: str) -> list[dict]:
+    """
+    Callable by the webhook bridge. Returns outline as list of dicts with title/description.
+    """
+    initial_state: AgentState = {
+        "user_question": topic,
+        "outline": None,
+        "user_approved": None,
+        "retrieved_facts": None,
+        "current_lesson_index": None,
+        "synthesized_lessons": None,
+        "current_lesson": None,
+        "error": None,
+    }
+    try:
+        result = outline_generator(initial_state)
+        if result.get("error"):
+            raise RuntimeError(result["error"])
+        outline_strings = result.get("outline") or []
+        if outline_strings:
+            return [{"title": t, "description": ""} for t in outline_strings]
+    except Exception:
+        # Fallback outline if Gemini is rate-limited / misconfigured.
+        pass
+
+    base = topic.strip() or "the topic"
+    fallback = [
+        f"Introduction to {base}",
+        f"Key concepts in {base}",
+        f"Common mistakes & pitfalls in {base}",
+        f"Best practices for {base}",
+        f"Real-world examples of {base}",
+    ]
+    return [{"title": t, "description": ""} for t in fallback]
 
 
 
@@ -181,8 +232,8 @@ def lesson_synthesizer(state: AgentState):
     """
     outline = state.get("outline")
     retrieved_facts = state.get("retrieved_facts")
-    current_index = state.get("current_lesson_index", 0)
-    synthesized_lessons = state.get("synthesized_lessons", [])
+    current_index: int = state.get("current_lesson_index") or 0
+    synthesized_lessons: list[dict[str, str]] = state.get("synthesized_lessons") or []
 
     if not outline or not retrieved_facts:
         return {"error": "Missing outline or retrieved facts for synthesis"}
@@ -234,7 +285,8 @@ Generate the lesson now:"""
         response = tool_llm.invoke(prompt)
 
         # Extract JSON from response
-        content = response.content.strip()
+        raw = response.content
+        content = (raw if isinstance(raw, str) else str(raw)).strip()
 
         # Remove markdown code blocks if present
         if content.startswith("```"):
@@ -280,8 +332,8 @@ def should_proceed_to_search(state: AgentState) -> str:
 
 def should_continue_lessons(state: AgentState) -> str:
     """Conditional edge: Check if there are more lessons to generate."""
-    outline = state.get("outline", [])
-    current_index = state.get("current_lesson_index", 0)
+    outline: list[str] = state.get("outline") or []
+    current_index: int = state.get("current_lesson_index") or 0
 
     if current_index < len(outline):
         return "lesson_synthesizer"
@@ -337,7 +389,16 @@ def run_cli():
     print("\n🚀 Generating your personalized micro-course...\n")
 
     # Run the pipeline
-    final_state = learnado_graph.invoke({"user_question": user_question})
+    final_state = learnado_graph.invoke({
+        "user_question": user_question,
+        "outline": None,
+        "user_approved": None,
+        "retrieved_facts": None,
+        "current_lesson_index": None,
+        "synthesized_lessons": None,
+        "current_lesson": None,
+        "error": None,
+    })
 
     # Check for errors
     if final_state.get("error"):
@@ -363,6 +424,58 @@ def run_cli():
         print("=" * 80)
     else:
         print("\n⚠️  No lessons were generated.")
+
+
+def synthesize_single_lesson(topic: str, lesson_title: str, description: str) -> str:
+    """
+    Callable by agent_bridge. Runs Tavily search + Gemini synthesis
+    for a single lesson and returns the lesson content as a plain string.
+    """
+    tavily_api_key = os.getenv("TAVILY_API_KEY") or ""
+    try:
+        from app.config import settings as _s
+        tavily_api_key = _s.tavily_api_key or tavily_api_key
+    except Exception:
+        pass
+
+    query = f"{topic} {lesson_title}"
+    topic_facts: dict = {}
+    try:
+        client = TavilyClient(tavily_api_key)
+        topic_facts = client.search(query=query, search_depth="advanced", max_results=5)
+    except Exception as e:
+        topic_facts = {"error": str(e)}
+
+    prompt = f"""You are a helpful teacher writing a short WhatsApp-friendly micro-lesson.
+
+Topic: {topic}
+Lesson: {lesson_title}
+{f"Context: {description}" if description else ""}
+
+Research material:
+{json.dumps(topic_facts, indent=2)}
+
+Instructions:
+1. Write 2-3 short paragraphs explaining this lesson clearly
+2. Use plain, simple language — no jargon
+3. Include one real-life example
+4. End with ONE short question to check understanding (e.g. "Quick check: ...")
+5. Keep total length under 800 characters (WhatsApp-friendly)
+
+Return ONLY the lesson text — no JSON, no markdown headers, no extra formatting."""
+
+    try:
+        llm = get_tool_llm()
+        response = llm.invoke(prompt)
+        raw = response.content
+        return (raw if isinstance(raw, str) else str(raw)).strip()
+    except Exception as e:
+        return (
+            f"*{lesson_title}*\n\n"
+            f"This lesson covers {lesson_title} as part of {topic}.\n\n"
+            f"_(Full content unavailable right now: {e})_\n\n"
+            "Quick check: What do you already know about this topic?"
+        )
 
 
 if __name__ == "__main__":

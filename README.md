@@ -140,7 +140,7 @@ LearnADo/
    python main.py
    ```
 
-The API will be available at `http://localhost:8000`
+The API will be available at `http://localhost:8001`
 
 ## 📊 Phase 1 Milestones
 
@@ -190,7 +190,7 @@ pytest tests/
 The project follows PEP 8 standards. Use a linter like `flake8` or `black` for code formatting.
 
 ### API Documentation
-Once running, visit `http://localhost:8000/docs` for interactive API documentation.
+Once running, visit `http://localhost:8001/docs` for interactive API documentation.
 
 ## 🤝 Contributing
 
