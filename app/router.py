@@ -109,6 +109,10 @@ async def route_message(
         if not mission:
             await set_user_state(db, user, "idle")
             return ("No active mission found. Ask your mentor to set one up.", None)
+        # If the learner replies "yes/start/ready" they may just be acknowledging
+        # the "Loading..." message — re-deliver the current lesson instead of scoring.
+        if body_clean in ("yes", "y", "start", "ok", "ready", "begin", "next"):
+            return await deliver_lesson(db, user, mission)
         return await evaluate_response(db, user, mission, body, media_url, media_type)
 
     # ── FALLBACK ─────────────────────────────────────────────────────
@@ -241,6 +245,9 @@ async def deliver_lesson(
             user.phone_number,
             f"Loading lesson *{lesson.title}*... one moment!",
         )
+        # Keep state as mission_notified so a stray "yes" re-triggers delivery
+        # rather than being scored as a lesson answer.
+        await set_user_state(db, user, "mission_notified")
         try:
             content = await get_lesson_content(mission.topic, lesson.title, "")
             lesson.content_md = content
