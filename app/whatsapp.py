@@ -33,7 +33,7 @@ async def send_message(
     chunks = [body[i : i + max_len] for i in range(0, len(body), max_len)] or [""]
 
     last_msg_id = ""
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(timeout=httpx.Timeout(30.0)) as client:
         for i, chunk in enumerate(chunks):
             payload: dict[str, Any] = {
                 "messaging_product": "whatsapp",
@@ -52,6 +52,11 @@ async def send_message(
                 payload["text"] = {"preview_url": False, "body": chunk}
 
             response = await client.post(url, headers=headers, json=payload)
+            if response.status_code >= 400:
+                logger.error(
+                    "WhatsApp API %s for %s: %s",
+                    response.status_code, to_phone, response.text,
+                )
             response.raise_for_status()
             data = response.json()
             if "messages" in data and len(data["messages"]) > 0:

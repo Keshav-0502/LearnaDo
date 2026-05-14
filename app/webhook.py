@@ -6,7 +6,9 @@ interrupt (outline review, waiting for start, lesson response).  If so it
 resumes; otherwise it starts a fresh graph run from classify_intent.
 """
 
+import asyncio
 import logging
+from collections import defaultdict
 
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import PlainTextResponse
@@ -17,6 +19,10 @@ from app.config import settings
 
 logger = logging.getLogger(__name__)
 webhook_router = APIRouter()
+
+_phone_locks: dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
+_seen_wamids: set[str] = set()
+_MAX_SEEN = 2000
 
 
 @webhook_router.get("/webhook")
@@ -46,9 +52,21 @@ async def whatsapp_webhook(request: Request):
             return {"status": "ok"}
 
         message_info = value["messages"][0]
+        wamid = message_info.get("id", "")
         phone = message_info.get("from", "").strip()
         if phone and not phone.startswith("+"):
             phone = "+" + phone
+
+        # Deduplicate — WhatsApp may retry or user may double-tap
+        if wamid and wamid in _seen_wamids:
+            logger.info("Duplicate wamid %s from %s — skipping", wamid, phone)
+            return {"status": "ok"}
+        if wamid:
+            _seen_wamids.add(wamid)
+            if len(_seen_wamids) > _MAX_SEEN:
+                to_remove = list(_seen_wamids)[:_MAX_SEEN // 2]
+                for r in to_remove:
+                    _seen_wamids.discard(r)
 
         msg_type = message_info.get("type", "text")
         if msg_type == "text":
@@ -68,29 +86,31 @@ async def whatsapp_webhook(request: Request):
         except Exception:
             logger.debug("Failed to save incoming message to DB", exc_info=True)
 
-        graph = request.app.state.graph
-        config = {"configurable": {"thread_id": phone}}
+        # Serialize graph runs per phone number
+        async with _phone_locks[phone]:
+            graph = request.app.state.graph
+            config = {"configurable": {"thread_id": phone}}
 
-        state_snapshot = await graph.aget_state(config)
-        has_interrupt = bool(state_snapshot.tasks) and any(
-            t.interrupts for t in state_snapshot.tasks
-        )
+            state_snapshot = await graph.aget_state(config)
+            has_interrupt = bool(state_snapshot.tasks) and any(
+                t.interrupts for t in state_snapshot.tasks
+            )
 
-        if has_interrupt:
-            logger.info("Resuming interrupt for %s", phone)
-            await graph.ainvoke(
-                Command(resume={"user_message": body}),
-                config=config,
-            )
-        else:
-            logger.info("New graph run for %s", phone)
-            await graph.ainvoke(
-                {
-                    "messages": [HumanMessage(content=body)],
-                    "phone_number": phone,
-                },
-                config=config,
-            )
+            if has_interrupt:
+                logger.info("Resuming interrupt for %s", phone)
+                await graph.ainvoke(
+                    Command(resume={"user_message": body}),
+                    config=config,
+                )
+            else:
+                logger.info("New graph run for %s", phone)
+                await graph.ainvoke(
+                    {
+                        "messages": [HumanMessage(content=body)],
+                        "phone_number": phone,
+                    },
+                    config=config,
+                )
 
     except Exception as e:
         logger.exception("Error in webhook: %s", e)

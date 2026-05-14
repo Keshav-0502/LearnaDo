@@ -131,9 +131,11 @@ async def classify_intent(state: LearnaDoState) -> dict:
         "- greeting: Saying hello, hi, how are you, or introducing themselves.\n"
         "- learning_request: Wants to learn a topic, OR wants someone else to "
         'learn a topic (e.g. "teach my friend about X", "I want Naman to learn Y", '
-        '"send a lesson on Z to 98378..."). Phrases like '
-        '"teach me", "explain", "I want to understand", or just a bare topic name.\n'
-        "- command: Reset, help, start, yes, no, cancel, continue, resume.\n"
+        '"send a lesson on Z to 98378...", "start a lesson on UPI on number 91234..."). '
+        'Phrases like "teach me", "explain", "start a lesson on", '
+        '"I want to understand", or just a bare topic name.\n'
+        "- command: Single-word commands like reset, help, yes, no, cancel, continue, resume. "
+        "NOT 'start a lesson on...' which is a learning_request.\n"
         "- off_topic: Questions about the bot itself, or anything unrelated to learning.\n"
         "- lesson_answer: A direct response to lesson content."
     )
