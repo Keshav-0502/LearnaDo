@@ -13,19 +13,22 @@ Helper functions for OCR, STT, translation, and common operations.
 
 import io
 import os
-import pymupdf
-import pytesseract
-from PIL import Image
-from dotenv import load_dotenv
-from langchain_google_genai import ChatGoogleGenerativeAI
+
 # import whisper
 # import torch
 from pathlib import Path
+
+import pymupdf
+import pytesseract
+from dotenv import load_dotenv
+from langchain_google_genai import ChatGoogleGenerativeAI
+from PIL import Image
 
 load_dotenv()
 
 # Initialize Gemini LLM lazily
 _llm = None
+
 
 def get_llm():
     """Get or initialize the Gemini LLM instance."""
@@ -39,6 +42,7 @@ def get_llm():
             )
         _llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", google_api_key=google_api_key)
     return _llm
+
 
 def extract_text_from_pdf(pdf_path: str) -> str:
     """
@@ -57,6 +61,7 @@ def extract_text_from_pdf(pdf_path: str) -> str:
             text += pytesseract.image_to_string(img)
     return text
 
+
 def process_image(file_path: str, user_query: str) -> str:
     """
     Extract text with Tesseract, send both extracted text and image to Gemini.
@@ -70,15 +75,24 @@ def process_image(file_path: str, user_query: str) -> str:
 
         # Send both to Gemini (multimodal input: text + image)
         llm = get_llm()
-        response = llm.invoke([
-            {"role": "user", "content": [
-                {"type": "text", "text": f"User query: {user_query}\n\nExtracted text (OCR): {extracted_text}"},
-                {"type": "image_url", "image_url": f"file://{file_path}"}
-            ]}
-        ])
+        response = llm.invoke(
+            [
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": f"User query: {user_query}\n\nExtracted text (OCR): {extracted_text}",
+                        },
+                        {"type": "image_url", "image_url": f"file://{file_path}"},
+                    ],
+                }
+            ]
+        )
         return response.content
     except Exception as e:
         raise RuntimeError(f"Error processing image: {e}")
+
 
 def query_audio(file_path: str, question: str) -> str:
     """
@@ -91,12 +105,11 @@ def query_audio(file_path: str, question: str) -> str:
         model = get_whisper_model()
         transcription = model.transcribe(file_path)["text"]
         llm = get_llm()
-        response = llm.invoke(
-            f"User question: {question}\n\nTranscribed audio:\n{transcription}"
-        )
+        response = llm.invoke(f"User question: {question}\n\nTranscribed audio:\n{transcription}")
         return response.content
     except Exception as e:
         raise RuntimeError(f"Error processing audio: {e}")
+
 
 def query_pdf(pdf_path: str, question: str) -> str:
     """
@@ -107,8 +120,10 @@ def query_pdf(pdf_path: str, question: str) -> str:
     res = llm.invoke(question + "\n\n" + content)
     return res.content
 
+
 # Lazy initialization for Whisper model
 _whisper_model = None
+
 
 def get_whisper_model():
     """Get or initialize the Whisper model instance."""
@@ -117,11 +132,15 @@ def get_whisper_model():
         try:
             import torch
             import whisper
+
             device = "cuda" if torch.cuda.is_available() else "cpu"
         except ImportError:
-            raise ImportError("Whisper or Torch is not installed. Please install them to use voice features.")
+            raise ImportError(
+                "Whisper or Torch is not installed. Please install them to use voice features."
+            )
         _whisper_model = whisper.load_model("base", device=device)
     return _whisper_model
+
 
 def transcribe_audio(file_path: str) -> str:
     """
@@ -139,7 +158,6 @@ def transcribe_audio(file_path: str) -> str:
     model = get_whisper_model()
     result = model.transcribe(file_path)
     return result["text"]
-
 
 
 # TODO: Translation Utilities
@@ -166,8 +184,8 @@ def clean_text(text: str) -> str:
     for analysis/classification steps.
     """
     text = text.strip()
-    text = re.sub(r"\s+", " ", text)                    # collapse whitespace
-    text = re.sub(r"[^\w\s?.!,'\"@#\-]", "", text)     # drop noisy special chars
+    text = re.sub(r"\s+", " ", text)  # collapse whitespace
+    text = re.sub(r"[^\w\s?.!,'\"@#\-]", "", text)  # drop noisy special chars
     return text
 
 

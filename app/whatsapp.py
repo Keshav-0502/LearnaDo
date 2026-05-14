@@ -26,7 +26,6 @@ async def send_message(
     headers = {
         "Authorization": f"Bearer {settings.whatsapp_access_token}",
         "Content-Type": "application/json",
-
     }
 
     # Meta has a 4096 character limit

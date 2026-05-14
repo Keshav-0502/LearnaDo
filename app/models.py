@@ -46,7 +46,9 @@ class User(Base):
     )
     progress: Mapped[list["UserProgress"]] = relationship("UserProgress", back_populates="user")
     messages: Mapped[list["Message"]] = relationship("Message", back_populates="user")
-    documents: Mapped[list["Document"]] = relationship("Document", back_populates="uploaded_by_user")
+    documents: Mapped[list["Document"]] = relationship(
+        "Document", back_populates="uploaded_by_user"
+    )
 
 
 class Mission(Base):

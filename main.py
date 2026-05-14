@@ -20,18 +20,21 @@ app = FastAPI(
     title="LearnADo",
     description="AI-powered learning assistant for document processing and analysis",
     version="1.0.0",
-    redirect_slashes=False
+    redirect_slashes=False,
 )
+
 
 @app.get("/")
 async def root():
     """Redirect to API documentation"""
     return RedirectResponse(url="/docs")
 
+
 @app.get("/health")
 async def health_check():
     """Health check endpoint"""
     return {"status": "healthy", "service": "LearnADo"}
+
 
 # API routes under /api
 app.include_router(app_router, prefix="/api")

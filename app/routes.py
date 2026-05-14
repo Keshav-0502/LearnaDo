@@ -2,15 +2,19 @@
 API routes for LearnADo application.
 All endpoints for file upload, processing, and retrieval.
 """
-from fastapi import APIRouter, UploadFile, File, HTTPException, Form
-from app.utils import transcribe_audio, query_pdf, process_image, query_audio
-from pathlib import Path
+
 import shutil
+from pathlib import Path
+
+from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+
+from app.utils import process_image, query_audio, query_pdf, transcribe_audio
 
 router = APIRouter()
 
 UPLOAD_DIR = Path("data/uploads")
 UPLOAD_DIR.mkdir(exist_ok=True, parents=True)
+
 
 @router.post("/transcribe")
 async def transcribe(file: UploadFile = File(...)):
@@ -22,11 +26,11 @@ async def transcribe(file: UploadFile = File(...)):
         file_path = UPLOAD_DIR / file.filename
         with open(file_path, "wb") as f:
             shutil.copyfileobj(file.file, f)
-        
+
         # Run Whisper transcription
         text = transcribe_audio(str(file_path))
         return {"filename": file.filename, "transcription": text}
-    
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -41,7 +45,7 @@ async def pdf_query(file: UploadFile = File(...), question: str = Form(...)):
         file_path = UPLOAD_DIR / file.filename
         with open(file_path, "wb") as f:
             shutil.copyfileobj(file.file, f)
-        
+
         answer = query_pdf(str(file_path), question)
         return {"filename": file.filename, "question": question, "answer": answer}
     except Exception as e:
@@ -50,10 +54,7 @@ async def pdf_query(file: UploadFile = File(...), question: str = Form(...)):
 
 # --- IMAGE Q&A ---
 @router.post("/image-query")
-async def image_query(
-    file: UploadFile = File(...),
-    query: str = Form("Describe this image")
-):
+async def image_query(file: UploadFile = File(...), query: str = Form("Describe this image")):
     """
     Upload an image → OCR with Tesseract → send text+image to Gemini.
     """
@@ -66,6 +67,7 @@ async def image_query(
         return {"filename": file.filename, "query": query, "response": response}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
 
 # --- AUDIO Q&A ---
 @router.post("/audio-query")
@@ -82,6 +84,7 @@ async def audio_query(file: UploadFile = File(...), question: str = Form(...)):
         return {"filename": file.filename, "question": question, "answer": answer}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
 
 # TODO: Import local modules
 # from app.schemas import *

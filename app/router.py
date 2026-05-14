@@ -175,7 +175,17 @@ async def route_message(
             return ("No active mission found. Ask your mentor to set one up.", None)
         # If the learner replies "yes/start/ready" they may just be acknowledging
         # the "Loading..." message — re-deliver the current lesson instead of scoring.
-        if body_clean in ("yes", "y", "start", "ok", "ready", "begin", "next", "continue", "resume"):
+        if body_clean in (
+            "yes",
+            "y",
+            "start",
+            "ok",
+            "ready",
+            "begin",
+            "next",
+            "continue",
+            "resume",
+        ):
             return await deliver_lesson(db, user, mission)
         return await evaluate_response(db, user, mission, body, media_url, media_type)
 
@@ -187,6 +197,7 @@ async def route_message(
 
 
 # ── Goal-setter handlers ──────────────────────────────────────────────────────
+
 
 async def handle_creating_mission(
     db: AsyncSession, user: User, body: str
@@ -204,9 +215,16 @@ async def handle_creating_mission(
     if not topic:
         # Try common natural language patterns first
         body_lower = body.lower()
-        for prefix in ("teach me about ", "teach me ", "learn about ", "explain ", "i want to learn about ", "i want to learn "):
+        for prefix in (
+            "teach me about ",
+            "teach me ",
+            "learn about ",
+            "explain ",
+            "i want to learn about ",
+            "i want to learn ",
+        ):
             if body_lower.startswith(prefix):
-                topic = body[len(prefix):].strip()
+                topic = body[len(prefix) :].strip()
                 break
         if not topic:
             # Don't treat garbage as a topic — ask clearly
@@ -218,7 +236,6 @@ async def handle_creating_mission(
 
     if not phone:
         phone = user.phone_number
-
 
     phone = phone.replace(" ", "").replace("-", "")
     # Add a '+' if it's missing, as some APIs (and Twilio previously) prefer it,
@@ -250,8 +267,7 @@ async def handle_creating_mission(
 
     mission = await create_mission_with_outline(db, user, phone, topic, outline)
     outline_text = "\n".join(
-        f"{i+1}. *{item.get('title', '')}*"
-        for i, item in enumerate(outline)
+        f"{i + 1}. *{item.get('title', '')}*" for i, item in enumerate(outline)
     )
 
     await set_user_state(db, user, f"confirming_outline:{mission.id}")
@@ -310,9 +326,8 @@ async def handle_confirming_outline(
 
 # ── Learner handlers ──────────────────────────────────────────────────────────
 
-async def deliver_lesson(
-    db: AsyncSession, user: User, mission
-) -> tuple[str, str | None]:
+
+async def deliver_lesson(db: AsyncSession, user: User, mission) -> tuple[str, str | None]:
     """Fetch or generate lesson content and send it to the learner."""
     lesson = await get_current_lesson(db, mission.id)
     if not lesson:
@@ -410,9 +425,7 @@ async def evaluate_response(
     return (great_job + next_reply, media)
 
 
-async def handle_mission_complete(
-    db: AsyncSession, user: User, mission
-) -> tuple[str, str | None]:
+async def handle_mission_complete(db: AsyncSession, user: User, mission) -> tuple[str, str | None]:
     from datetime import datetime, timezone
 
     mission.status = "completed"

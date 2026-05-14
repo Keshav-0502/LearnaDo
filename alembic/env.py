@@ -1,13 +1,12 @@
 from logging.config import fileConfig
 
-from sqlalchemy import pool
-from sqlalchemy import engine_from_config
+from sqlalchemy import engine_from_config, pool
 
+import app.models  # noqa: F401 — registers all models with Base.metadata
 from alembic import context
 
 # Load app config and models so autogenerate can detect schema changes
 from app.config import settings
-import app.models  # noqa: F401 — registers all models with Base.metadata
 from app.database import Base
 
 alembic_config = context.config

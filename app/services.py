@@ -109,6 +109,7 @@ async def cancel_mission(db: AsyncSession, mission: Mission) -> None:
 
 # ── Phase 4: progress tracking ────────────────────────────────────────────────
 
+
 async def get_current_progress(
     db: AsyncSession, user_id: uuid.UUID, mission_id: uuid.UUID
 ) -> UserProgress | None:
@@ -157,9 +158,7 @@ async def record_attempt(
     await db.commit()
 
 
-async def complete_lesson(
-    db: AsyncSession, progress: UserProgress, lesson: Lesson
-) -> None:
+async def complete_lesson(db: AsyncSession, progress: UserProgress, lesson: Lesson) -> None:
     progress.status = "completed"
     lesson.status = "completed"
     await db.commit()
@@ -181,9 +180,7 @@ async def get_next_lesson(
     return result.scalar_one_or_none()
 
 
-async def get_mission_progress_summary(
-    db: AsyncSession, mission_id: uuid.UUID
-) -> dict:
+async def get_mission_progress_summary(db: AsyncSession, mission_id: uuid.UUID) -> dict:
     result = await db.execute(select(Lesson).where(Lesson.mission_id == mission_id))
     lessons = result.scalars().all()
     completed = [l for l in lessons if l.status == "completed"]

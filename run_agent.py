@@ -5,11 +5,13 @@ Provides an interactive command-line interface for step-by-step micro-course gen
 """
 
 import sys
+
 from rich.console import Console
 from rich.markdown import Markdown
 from rich.panel import Panel
 from rich.table import Table
-from app.agent import learnado_graph, search_and_lesson_graph
+
+from app.agent import learnado_graph
 
 console = Console()
 
@@ -47,29 +49,26 @@ def display_outline(outline):
 
 def display_lesson(lesson, lesson_num, total_lessons):
     """Display a single lesson with sources."""
-    title = lesson.get('title', 'Untitled Lesson')
-    content = lesson.get('content', 'No content available')
-    sources = lesson.get('sources', [])
+    title = lesson.get("title", "Untitled Lesson")
+    content = lesson.get("content", "No content available")
+    sources = lesson.get("sources", [])
 
     # Display lesson content
     lesson_header = f"📖 Lesson {lesson_num}/{total_lessons}: {title}"
     console.print("\n")
-    console.print(Panel(
-        Markdown(content),
-        title=lesson_header,
-        border_style="cyan",
-        padding=(1, 2)
-    ))
+    console.print(
+        Panel(Markdown(content), title=lesson_header, border_style="cyan", padding=(1, 2))
+    )
 
     # Display sources with relevance scores (only show sources >= 0.7)
     if sources:
         # Filter sources by threshold
-        filtered_sources = [s for s in sources if s.get('score', 0.0) >= 0.7]
+        filtered_sources = [s for s in sources if s.get("score", 0.0) >= 0.7]
 
         if filtered_sources:
             console.print("\n[bold]📚 Sources:[/bold]")
             for i, source in enumerate(filtered_sources, 1):
-                score = source.get('score', 0.0)
+                score = source.get("score", 0.0)
                 console.print(f"  {i}. [{source['title']}]({source['url']}) {score:.2f}")
                 console.print(f"     [dim]{source['url']}[/dim]")
         else:
@@ -86,7 +85,9 @@ def main():
         while True:
             # ========== PHASE 1: GET USER QUESTION ==========
             try:
-                user_input = console.input("\n[bold green]💭 What would you like to learn about?[/bold green]\n> ").strip()
+                user_input = console.input(
+                    "\n[bold green]💭 What would you like to learn about?[/bold green]\n> "
+                ).strip()
             except (EOFError, KeyboardInterrupt):
                 console.print("\n\n[yellow]Session ended. Goodbye! 👋[/yellow]")
                 break
@@ -104,7 +105,7 @@ def main():
 
             # Check if query contains "about [something]" or "of [something]" (excluding "yourself", "you")
             has_topic_phrase = False
-            if re.search(r'\babout\s+(?!yourself|you\b)\w+', user_input.lower()):
+            if re.search(r"\babout\s+(?!yourself|you\b)\w+", user_input.lower()):
                 has_topic_phrase = True
 
             if has_topic_phrase:
@@ -167,13 +168,15 @@ Respond with ONLY one word: IDENTITY or LEARNING"""
 
                 try:
                     classifier_llm = get_main_llm()
-                    classification = classifier_llm.invoke(classifier_prompt).content.strip().upper()
+                    classification = (
+                        classifier_llm.invoke(classifier_prompt).content.strip().upper()
+                    )
 
                     # More robust classification check
                     is_identity = (
-                        "IDENTITY" in classification or
-                        classification == "IDENTITY" or
-                        classification.startswith("IDENTITY")
+                        "IDENTITY" in classification
+                        or classification == "IDENTITY"
+                        or classification.startswith("IDENTITY")
                     )
                 except Exception as e:
                     # If classification fails, proceed with normal flow (assume LEARNING)
@@ -183,8 +186,9 @@ Respond with ONLY one word: IDENTITY or LEARNING"""
             # Handle identity queries
             if is_identity:
                 console.print("\n[bold cyan]🎓 About LearnaDo:[/bold cyan]")
-                console.print(Panel(
-                    Markdown("""
+                console.print(
+                    Panel(
+                        Markdown("""
 I'm **LearnaDo**, an interactive micro-course generator designed to help you learn any topic effectively!
 
 **What I do:**
@@ -201,13 +205,16 @@ I'm **LearnaDo**, an interactive micro-course generator designed to help you lea
 
 Just ask me what you'd like to learn about, and I'll create a personalized course for you!
                     """),
-                    title="🎓 LearnaDo",
-                    border_style="cyan"
-                ))
+                        title="🎓 LearnaDo",
+                        border_style="cyan",
+                    )
+                )
                 continue
 
             # ========== PHASE 2: GENERATE OUTLINE ==========
-            console.print(f"\n[bold cyan]🎯 Analyzing your topic and creating a learning plan...[/bold cyan]\n")
+            console.print(
+                "\n[bold cyan]🎯 Analyzing your topic and creating a learning plan...[/bold cyan]\n"
+            )
 
             try:
                 # Step 1: Generate outline
@@ -219,21 +226,29 @@ Just ask me what you'd like to learn about, and I'll create a personalized cours
 
                 outline = state.get("outline")
                 if not outline:
-                    console.print("\n[yellow]⚠️  Failed to generate outline. Please try again.[/yellow]")
+                    console.print(
+                        "\n[yellow]⚠️  Failed to generate outline. Please try again.[/yellow]"
+                    )
                     continue
 
                 # Display outline
                 display_outline(outline)
 
                 # ========== PHASE 3: GET USER APPROVAL ==========
-                approval = console.input("[bold yellow]Do you want to proceed with this outline? (yes/no):[/bold yellow] ").strip().lower()
+                approval = (
+                    console.input(
+                        "[bold yellow]Do you want to proceed with this outline? (yes/no):[/bold yellow] "
+                    )
+                    .strip()
+                    .lower()
+                )
 
                 if approval not in ["yes", "y", "sure", "ok", "okay", "yeah", "yep"]:
                     console.print("\n[yellow]📝 Outline rejected. Let's try again![/yellow]")
                     continue
 
                 # ========== PHASE 4: RESEARCH TOPICS (ONE TIME) ==========
-                console.print(f"\n[bold cyan]🔍 Great! Researching all topics...[/bold cyan]\n")
+                console.print("\n[bold cyan]🔍 Great! Researching all topics...[/bold cyan]\n")
 
                 # Initialize state for phase 2
                 state["current_lesson_index"] = 0
@@ -241,20 +256,24 @@ Just ask me what you'd like to learn about, and I'll create a personalized cours
 
                 # Run ONLY the search phase (not lesson generation yet)
                 from app.agent import source_harvester
+
                 search_result = source_harvester(state)
 
                 if search_result.get("error"):
-                    console.print(f"\n[bold red]❌ Error during research:[/bold red] {search_result['error']}")
+                    console.print(
+                        f"\n[bold red]❌ Error during research:[/bold red] {search_result['error']}"
+                    )
                     continue
 
                 # Update state with search results
                 state.update(search_result)
 
                 # ========== PHASE 5: DELIVER LESSONS ONE BY ONE ==========
-                console.print(f"\n[bold cyan]✍️  Generating lesson 1...[/bold cyan]")
+                console.print("\n[bold cyan]✍️  Generating lesson 1...[/bold cyan]")
 
                 # Generate first lesson
                 from app.agent import lesson_synthesizer
+
                 lesson_result = lesson_synthesizer(state)
 
                 if lesson_result.get("error"):
@@ -265,7 +284,9 @@ Just ask me what you'd like to learn about, and I'll create a personalized cours
                 current_lesson = state.get("current_lesson")
 
                 if not current_lesson:
-                    console.print("\n[yellow]⚠️  No lesson was generated. Please try again.[/yellow]")
+                    console.print(
+                        "\n[yellow]⚠️  No lesson was generated. Please try again.[/yellow]"
+                    )
                     continue
 
                 # Display the first lesson
@@ -274,14 +295,24 @@ Just ask me what you'd like to learn about, and I'll create a personalized cours
                 # Continue generating and displaying remaining lessons
                 for i in range(2, len(outline) + 1):
                     # Ask if user wants the next lesson
-                    next_input = console.input(f"[bold green]Ready for lesson {i}? (yes/no/exit):[/bold green] ").strip().lower()
+                    next_input = (
+                        console.input(
+                            f"[bold green]Ready for lesson {i}? (yes/no/exit):[/bold green] "
+                        )
+                        .strip()
+                        .lower()
+                    )
 
                     if next_input in ["exit", "quit", "stop"]:
-                        console.print("\n[yellow]📚 Course paused. You can start a new topic anytime![/yellow]")
+                        console.print(
+                            "\n[yellow]📚 Course paused. You can start a new topic anytime![/yellow]"
+                        )
                         break
 
                     if next_input not in ["yes", "y", "sure", "ok", "okay", "yeah", "yep", ""]:
-                        console.print("\n[yellow]⏸️  Pausing here. Type a new topic to start fresh.[/yellow]")
+                        console.print(
+                            "\n[yellow]⏸️  Pausing here. Type a new topic to start fresh.[/yellow]"
+                        )
                         break
 
                     console.print(f"\n[bold cyan]✍️  Generating lesson {i}...[/bold cyan]")
@@ -303,7 +334,9 @@ Just ask me what you'd like to learn about, and I'll create a personalized cours
 
                 # Course complete
                 total_generated = len(state.get("synthesized_lessons", []))
-                console.print(f"\n[bold green]🎉 Course section complete! You've learned {total_generated} topic(s).[/bold green]")
+                console.print(
+                    f"\n[bold green]🎉 Course section complete! You've learned {total_generated} topic(s).[/bold green]"
+                )
                 console.print("[dim]Start a new topic or type 'exit' to quit.[/dim]\n")
 
             except Exception as e:

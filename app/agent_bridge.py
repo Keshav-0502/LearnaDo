@@ -14,7 +14,6 @@ from app.agent import generate_outline_from_topic, synthesize_single_lesson
 IntentType = Literal["greeting", "learning_request", "command", "off_topic", "lesson_answer"]
 
 
-
 async def get_outline(topic: str) -> list[dict]:
     """Returns [{"title": "...", "description": ""}, ...]"""
     loop = asyncio.get_event_loop()
@@ -35,9 +34,7 @@ async def get_lesson_content(
     )
 
 
-def _get_lesson_content_sync(
-    topic: str, lesson_title: str, description: str, context: str
-) -> str:
+def _get_lesson_content_sync(topic: str, lesson_title: str, description: str, context: str) -> str:
     """Sync wrapper that injects context before delegating to synthesize_single_lesson."""
     # synthesize_single_lesson builds its own prompt internally, so we wrap the
     # result with a context-aware preamble passed via a thin shim prompt when
@@ -48,9 +45,7 @@ def _get_lesson_content_sync(
     return synthesize_single_lesson(topic, lesson_title, enriched_description)
 
 
-async def score_confusion(
-    lesson_content: str, learner_response: str, context: str = ""
-) -> float:
+async def score_confusion(lesson_content: str, learner_response: str, context: str = "") -> float:
     """
     Returns 0.0 (fully understood) → 1.0 (completely confused).
     Uses Gemini Flash — no Tavily needed.
@@ -71,9 +66,7 @@ async def simplify_lesson(content: str, context: str = "") -> str:
     return await loop.run_in_executor(None, _simplify_lesson_sync, content, context)
 
 
-def _score_confusion_sync(
-    lesson_content: str, learner_response: str, context: str
-) -> float:
+def _score_confusion_sync(lesson_content: str, learner_response: str, context: str) -> float:
     from app.agent import get_tool_llm
 
     context_prefix = f"{context}\n\n" if context else ""

@@ -16,6 +16,7 @@ def _get_gemini_api_key() -> str:
     """Prefer app config so webhook can use GEMINI_API_KEY or GOOGLE_API_KEY."""
     try:
         from app.config import settings
+
         key = settings.gemini_api_key or settings.google_api_key
         if key:
             return key
@@ -25,10 +26,6 @@ def _get_gemini_api_key() -> str:
     if not key:
         raise ValueError("GOOGLE_API_KEY or GEMINI_API_KEY not set")
     return key
-
-
-
-
 
 
 class AgentState(TypedDict):
@@ -45,9 +42,6 @@ class AgentState(TypedDict):
 # class ModuleDesign(TypedDict):
 #     title: str | None
 #     content: str | None
-
-
-
 
 
 def outline_generator(state: AgentState):
@@ -118,17 +112,13 @@ def source_harvester(state: AgentState):
     def search_topic(topic: str) -> tuple[str, dict]:
         """Search a single topic and return (topic, results)."""
         try:
-            response = tavily_client.search(
-                query=topic,
-                search_depth="advanced",
-                max_results=5
-            )
+            response = tavily_client.search(query=topic, search_depth="advanced", max_results=5)
 
             # Log the search
             log_entry = {
                 "timestamp": datetime.now().isoformat(),
                 "query": topic,
-                "response": response
+                "response": response,
             }
 
             # Thread-safe logging
@@ -169,6 +159,7 @@ def source_harvester(state: AgentState):
 # Lazy initialization of LLMs
 _tool_llm = None
 _main_llm = None
+
 
 def get_tool_llm():
     """Get or initialize the tool LLM instance."""
@@ -225,7 +216,6 @@ def generate_outline_from_topic(topic: str) -> list[dict]:
     return [{"title": t, "description": ""} for t in fallback]
 
 
-
 def lesson_synthesizer(state: AgentState):
     """
     Generate ONE lesson at a time based on current_lesson_index.
@@ -251,11 +241,13 @@ def lesson_synthesizer(state: AgentState):
     if isinstance(topic_facts, dict) and "results" in topic_facts:
         for result in topic_facts["results"]:
             if "url" in result:
-                sources.append({
-                    "title": result.get("title", "Unknown"),
-                    "url": result["url"],
-                    "score": result.get("score", 0.0)  # Relevance score (0.0-1.0)
-                })
+                sources.append(
+                    {
+                        "title": result.get("title", "Unknown"),
+                        "url": result["url"],
+                        "score": result.get("score", 0.0),  # Relevance score (0.0-1.0)
+                    }
+                )
 
     prompt = f"""You are a helpful teacher. Your task is to write ONE engaging micro-learning lesson.
 
@@ -311,7 +303,7 @@ Generate the lesson now:"""
         return {
             "current_lesson": lesson,
             "synthesized_lessons": synthesized_lessons,
-            "current_lesson_index": current_index + 1
+            "current_lesson_index": current_index + 1,
         }
 
     except json.JSONDecodeError as e:
@@ -320,15 +312,17 @@ Generate the lesson now:"""
         return {"error": f"Error synthesizing lesson: {str(e)}"}
 
 
-#================================================================================================================
+# ================================================================================================================
 # LEARNADO GRAPH: Interactive Outline-Search-Synthesize Pipeline
-#================================================================================================================
+# ================================================================================================================
+
 
 def should_proceed_to_search(state: AgentState) -> str:
     """Conditional edge: Check if user approved the outline."""
     if state.get("user_approved"):
         return "source_harvester"
     return END  # User rejected, end the flow
+
 
 def should_continue_lessons(state: AgentState) -> str:
     """Conditional edge: Check if there are more lessons to generate."""
@@ -369,7 +363,7 @@ builder_phase2.add_edge("lesson_synthesizer", END)
 search_and_lesson_graph = builder_phase2.compile()
 
 
-#==========================================================================================
+# ==========================================================================================
 
 
 def run_cli():
@@ -387,16 +381,18 @@ def run_cli():
     print("\n🚀 Generating your personalized micro-course...\n")
 
     # Run the pipeline
-    final_state = learnado_graph.invoke({
-        "user_question": user_question,
-        "outline": None,
-        "user_approved": None,
-        "retrieved_facts": None,
-        "current_lesson_index": None,
-        "synthesized_lessons": None,
-        "current_lesson": None,
-        "error": None,
-    })
+    final_state = learnado_graph.invoke(
+        {
+            "user_question": user_question,
+            "outline": None,
+            "user_approved": None,
+            "retrieved_facts": None,
+            "current_lesson_index": None,
+            "synthesized_lessons": None,
+            "current_lesson": None,
+            "error": None,
+        }
+    )
 
     # Check for errors
     if final_state.get("error"):
@@ -415,7 +411,7 @@ def run_cli():
             print(f"\n{'─' * 80}")
             print(f"📖 Lesson {i}: {lesson.get('title', 'Untitled')}")
             print(f"{'─' * 80}")
-            print(lesson.get('content', ''))
+            print(lesson.get("content", ""))
 
         print("\n" + "=" * 80)
         print(f"✅ Course complete! ({len(synthesized_lessons)} lessons)")
@@ -432,6 +428,7 @@ def synthesize_single_lesson(topic: str, lesson_title: str, description: str) ->
     tavily_api_key = os.getenv("TAVILY_API_KEY") or ""
     try:
         from app.config import settings as _s
+
         tavily_api_key = _s.tavily_api_key or tavily_api_key
     except Exception:
         pass

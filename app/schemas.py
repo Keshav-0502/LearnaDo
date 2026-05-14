@@ -8,14 +8,15 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-
 # ── Shared config ─────────────────────────────────────────────────────────────
+
 
 class _Base(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
 # ── User ──────────────────────────────────────────────────────────────────────
+
 
 class UserCreate(BaseModel):
     phone_number: str = Field(..., max_length=20)
@@ -40,6 +41,7 @@ class UserOut(_Base):
 
 
 # ── Mission ───────────────────────────────────────────────────────────────────
+
 
 class MissionCreate(BaseModel):
     goal_setter_id: uuid.UUID
@@ -67,6 +69,7 @@ class MissionOut(_Base):
 
 # ── Lesson ────────────────────────────────────────────────────────────────────
 
+
 class LessonCreate(BaseModel):
     mission_id: uuid.UUID
     order_index: int = Field(..., ge=0)
@@ -92,6 +95,7 @@ class LessonOut(_Base):
 
 
 # ── UserProgress ──────────────────────────────────────────────────────────────
+
 
 class UserProgressCreate(BaseModel):
     mission_id: uuid.UUID
@@ -122,6 +126,7 @@ class UserProgressOut(_Base):
 
 # ── Message ───────────────────────────────────────────────────────────────────
 
+
 class MessageCreate(BaseModel):
     user_id: uuid.UUID
     mission_id: uuid.UUID | None = None
@@ -144,6 +149,7 @@ class MessageOut(_Base):
 
 # ── Document ──────────────────────────────────────────────────────────────────
 
+
 class DocumentCreate(BaseModel):
     mission_id: uuid.UUID | None = None
     uploaded_by: uuid.UUID
@@ -163,6 +169,7 @@ class DocumentOut(_Base):
 
 
 # ── Generic responses ─────────────────────────────────────────────────────────
+
 
 class HealthResponse(BaseModel):
     status: str = "ok"

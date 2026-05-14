@@ -32,6 +32,7 @@ _SENTIMENT_CONTEXT: dict[str, str] = {
 @dataclass
 class OrchestratorResult:
     """Carries pre-computed intent, sentiment, and an enriched context string."""
+
     cleaned_text: str
     intent: IntentType
     sentiment: SentimentType
@@ -50,9 +51,7 @@ async def analyse(body: str, user_state: str) -> OrchestratorResult:
     """
     cleaned = clean_text(body)
     loop = asyncio.get_event_loop()
-    intent, sentiment = await loop.run_in_executor(
-        None, _classify_sync, cleaned, user_state
-    )
+    intent, sentiment = await loop.run_in_executor(None, _classify_sync, cleaned, user_state)
     enriched_context = _SENTIMENT_CONTEXT.get(sentiment, "")
     return OrchestratorResult(
         cleaned_text=cleaned,
@@ -70,12 +69,14 @@ def _classify_sync(cleaned_text: str, user_state: str) -> tuple[IntentType, Sent
     """
     try:
         import os
+
         from langchain_google_genai import ChatGoogleGenerativeAI
 
         # Resolve API key the same way agent.py does
         api_key: str = ""
         try:
             from app.config import settings
+
             api_key = settings.gemini_api_key or settings.google_api_key or ""
         except Exception:
             pass
@@ -98,7 +99,7 @@ def _classify_sync(cleaned_text: str, user_state: str) -> tuple[IntentType, Sent
             "- command: Issuing commands like reset, help, start, yes, no, cancel, "
             "continue, resume. Also includes requests to send a lesson to someone else "
             '("teach my friend", "send to").\n'
-            "- off_topic: Questions about the bot itself (\"who are you\", \"what can you do\"), "
+            '- off_topic: Questions about the bot itself ("who are you", "what can you do"), '
             "or anything unrelated to learning.\n"
             "- lesson_answer: Responding to lesson content (only relevant in in_lesson state).\n\n"
             "Return ONLY valid JSON (no markdown, no explanation):\n"
@@ -107,7 +108,9 @@ def _classify_sync(cleaned_text: str, user_state: str) -> tuple[IntentType, Sent
         )
 
         response = llm.invoke(prompt)
-        raw = (response.content if isinstance(response.content, str) else str(response.content)).strip()
+        raw = (
+            response.content if isinstance(response.content, str) else str(response.content)
+        ).strip()
 
         # Strip accidental markdown fences
         if raw.startswith("```"):
@@ -118,7 +121,13 @@ def _classify_sync(cleaned_text: str, user_state: str) -> tuple[IntentType, Sent
 
         data = json.loads(raw)
 
-        valid_intents: set[str] = {"greeting", "learning_request", "command", "off_topic", "lesson_answer"}
+        valid_intents: set[str] = {
+            "greeting",
+            "learning_request",
+            "command",
+            "off_topic",
+            "lesson_answer",
+        }
         valid_sentiments: set[str] = {"frustrated", "confused", "positive", "neutral"}
 
         intent: IntentType = data.get("intent", _FALLBACK_INTENT)
