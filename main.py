@@ -19,7 +19,8 @@ from app.webhook import webhook_router
 app = FastAPI(
     title="LearnADo",
     description="AI-powered learning assistant for document processing and analysis",
-    version="1.0.0"
+    version="1.0.0",
+    redirect_slashes=False
 )
 
 @app.get("/")

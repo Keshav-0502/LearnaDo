@@ -26,10 +26,10 @@ class Settings(BaseSettings):
     # SQLAlchemy
     db_echo: bool = False
 
-    # Twilio (WhatsApp)
-    twilio_account_sid: str = ""
-    twilio_auth_token: str = ""
-    twilio_whatsapp_from: str = "whatsapp:+14155238886"
+    # Meta (WhatsApp)
+    whatsapp_access_token: str = ""
+    meta_verify_token: str = "TESTTOKENFORLEARNADO"
+    whatsapp_phone_number_id: str = ""
 
     @computed_field  # type: ignore[prop-decorator]
     @property

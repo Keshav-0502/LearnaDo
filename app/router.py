@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agent_bridge import get_lesson_content, get_outline, score_confusion, simplify_lesson
 from app.models import User
+from app.orchestrator import OrchestratorResult
 from app.services import (
     activate_mission,
     cancel_mission,
@@ -35,6 +36,7 @@ async def route_message(
     body: str,
     media_url: str | None,
     media_type: str | None,
+    result: OrchestratorResult | None = None,
 ) -> tuple[str, str | None]:
     """
     Returns (reply_text, reply_media_url).
@@ -54,30 +56,92 @@ async def route_message(
 
     # ── IDLE ─────────────────────────────────────────────────────────
     if state == "idle":
+        # Check for dual-user format first
         if "phone:" in body_clean and "topic:" in body_clean:
             await set_user_state(db, user, "creating_mission")
             return await handle_creating_mission(db, user, body)
 
-        mission = await get_active_mission_as_learner(db, user.id)
-        if mission:
-            await set_user_state(db, user, "mission_notified")
+        intent = result.intent if result else "off_topic"
+
+        if intent == "greeting":
+            mission = await get_active_mission_as_learner(db, user.id)
+            if mission:
+                lesson = await get_current_lesson(db, mission.id)
+                summary = await get_mission_progress_summary(db, mission.id)
+                lesson_title = lesson.title if lesson else "your last lesson"
+                return (
+                    f"Welcome back! 👋\n\n"
+                    f"You have an ongoing mission: *{mission.topic}*\n"
+                    f"Progress: {summary['completed']}/{summary['total']} lessons done.\n"
+                    f"You were on: *{lesson_title}*\n\n"
+                    "Reply *continue* to pick up where you left off, or tell me a new topic to start fresh!",
+                    None,
+                )
             return (
-                f"You have a learning mission waiting: *{mission.topic}*\n\n"
-                "Reply *start* when you're ready to begin!",
+                "Hey! 👋 I'm LearnaDo, your AI learning assistant.\n\n"
+                "Tell me what you'd like to learn and I'll build a personalised course for you!\n\n"
+                "For example: _'teach me about black holes'_ or _'explain UPI safety'_",
                 None,
             )
+
+        if intent == "learning_request":
+            await set_user_state(db, user, "creating_mission")
+            return await handle_creating_mission(db, user, body)
+
+        if intent == "off_topic":
+            return (
+                "I'm LearnaDo — your AI learning assistant! 🎓\n\n"
+                "I can build you a personalised micro-course on almost any topic.\n\n"
+                "Just tell me what you'd like to learn!",
+                None,
+            )
+
+        if intent == "command":
+            if body_clean in ("continue", "resume"):
+                mission = await get_active_mission_as_learner(db, user.id)
+                if mission:
+                    await set_user_state(db, user, "mission_notified")
+                    return await route_message(db, user, "start", None, None)
+            await set_user_state(db, user, "creating_mission")
+            return (
+                "What would you like to learn about today?",
+                None,
+            )
+
+        # fallback
         await set_user_state(db, user, "creating_mission")
-        return (
-            "Welcome to LearnaDo!\n\n"
-            "Who do you want to teach, and what topic?\n\n"
-            "Reply in this format:\n"
-            "phone: +91XXXXXXXXXX\n"
-            "topic: UPI safety",
-            None,
-        )
+        return await handle_creating_mission(db, user, body)
 
     # ── GOAL-SETTER: creating mission ────────────────────────────────
     if state == "creating_mission":
+        # Intent already classified by the orchestrator; fall back to off_topic
+        # if called without a result (e.g. from tests or CLI).
+        intent = result.intent if result else "off_topic"
+
+        if intent == "greeting":
+            return (
+                "Hey! 👋 I'm LearnaDo, your AI learning assistant.\n\n"
+                "Tell me what you'd like to learn and I'll build a personalised course for you!\n\n"
+                "For example: _'teach me about UPI safety'_ or _'explain black holes'_",
+                None,
+            )
+
+        if intent == "off_topic":
+            return (
+                "I'm best at helping you *learn things*! 🎓\n\n"
+                "Just tell me a topic you want to explore and I'll get started.",
+                None,
+            )
+
+        if intent == "command":
+            # Let the next message be a fresh start
+            await set_user_state(db, user, "idle")
+            return (
+                "Okay, let's start fresh! What would you like to learn about?",
+                None,
+            )
+
+        # learning_request or lesson_answer — proceed to create the mission
         return await handle_creating_mission(db, user, body)
 
     # ── GOAL-SETTER: waiting for outline approval ────────────────────
@@ -95,7 +159,7 @@ async def route_message(
 
     # ── LEARNER: mission notified → deliver first lesson ─────────────
     if state == "mission_notified":
-        if body_clean in ("start", "yes", "ready", "ok", "begin"):
+        if body_clean in ("start", "yes", "ready", "ok", "begin", "continue", "resume"):
             mission = await get_active_mission_as_learner(db, user.id)
             if not mission:
                 await set_user_state(db, user, "idle")
@@ -111,7 +175,7 @@ async def route_message(
             return ("No active mission found. Ask your mentor to set one up.", None)
         # If the learner replies "yes/start/ready" they may just be acknowledging
         # the "Loading..." message — re-deliver the current lesson instead of scoring.
-        if body_clean in ("yes", "y", "start", "ok", "ready", "begin", "next"):
+        if body_clean in ("yes", "y", "start", "ok", "ready", "begin", "next", "continue", "resume"):
             return await deliver_lesson(db, user, mission)
         return await evaluate_response(db, user, mission, body, media_url, media_type)
 
@@ -136,22 +200,36 @@ async def handle_creating_mission(
         elif lower.startswith("topic:"):
             topic = line.split(":", 1)[1].strip()
 
-    if not phone or not topic:
-        return (
-            "Please use this exact format:\n\n"
-            "phone: +91XXXXXXXXXX\n"
-            "topic: what you want them to learn\n\n"
-            "For example:\n"
-            "phone: +919876543210\n"
-            "topic: UPI safety for elderly users",
-            None,
-        )
+    # If they didn't use the structured format, extract topic intelligently
+    if not topic:
+        # Try common natural language patterns first
+        body_lower = body.lower()
+        for prefix in ("teach me about ", "teach me ", "learn about ", "explain ", "i want to learn about ", "i want to learn "):
+            if body_lower.startswith(prefix):
+                topic = body[len(prefix):].strip()
+                break
+        if not topic:
+            # Don't treat garbage as a topic — ask clearly
+            return (
+                "What topic would you like to learn about?\n\n"
+                "For example: _'UPI safety'_, _'machine learning basics'_, _'how vaccines work'_",
+                None,
+            )
+
+    if not phone:
+        phone = user.phone_number
+
 
     phone = phone.replace(" ", "").replace("-", "")
-    if not phone.startswith("+") or len(phone) < 10:
+    # Add a '+' if it's missing, as some APIs (and Twilio previously) prefer it,
+    # or just make sure it's long enough and numeric.
+    if not phone.startswith("+"):
+        phone = "+" + phone
+
+    if len(phone) < 10:
         return (
             f"That phone number doesn't look right: *{phone}*\n"
-            "Make sure to include the country code, e.g. +919876543210",
+            "Make sure it includes the country code, e.g. +919876543210",
             None,
         )
 
@@ -249,7 +327,8 @@ async def deliver_lesson(
         # rather than being scored as a lesson answer.
         await set_user_state(db, user, "mission_notified")
         try:
-            content = await get_lesson_content(mission.topic, lesson.title, "")
+            enriched = result.enriched_context if result else ""
+            content = await get_lesson_content(mission.topic, lesson.title, "", context=enriched)
             lesson.content_md = content
             await db.commit()
         except Exception as e:
@@ -291,7 +370,8 @@ async def evaluate_response(
     if not progress:
         return await deliver_lesson(db, user, mission)
 
-    confusion = await score_confusion(lesson.content_md or "", body)
+    enriched = result.enriched_context if result else ""
+    confusion = await score_confusion(lesson.content_md or "", body, context=enriched)
     await record_attempt(db, progress, confusion)
 
     # Force-advance after MAX_ATTEMPTS regardless of score
@@ -304,7 +384,7 @@ async def evaluate_response(
         return await deliver_lesson(db, user, mission)
 
     if confusion > CONFUSION_THRESHOLD:
-        simplified = await simplify_lesson(lesson.content_md or "")
+        simplified = await simplify_lesson(lesson.content_md or "", context=enriched)
         attempts_left = MAX_ATTEMPTS - progress.attempts
         return (
             f"Let me explain that differently!\n\n"

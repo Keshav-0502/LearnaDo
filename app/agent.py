@@ -344,8 +344,6 @@ builder = StateGraph(AgentState)
 
 # Add nodes
 builder.add_node("outline_generator", outline_generator)
-builder.add_node("source_harvester", source_harvester)
-builder.add_node("lesson_synthesizer", lesson_synthesizer)
 
 # Define flow
 builder.add_edge(START, "outline_generator")
