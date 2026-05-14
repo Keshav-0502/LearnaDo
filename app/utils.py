@@ -40,7 +40,7 @@ def get_llm():
                 "GOOGLE_API_KEY not found in environment variables. "
                 "Please set it in your .env file or environment."
             )
-        _llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", google_api_key=google_api_key)
+        _llm = ChatGoogleGenerativeAI(model="gemini-3-flash-preview", api_key=google_api_key)
     return _llm
 
 

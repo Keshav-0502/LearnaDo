@@ -9,7 +9,7 @@ in a single LLM call that also captures sentiment.
 import asyncio
 from typing import Literal
 
-from app.agent import generate_outline_from_topic, synthesize_single_lesson
+from app.agent import _extract_text, generate_outline_from_topic, synthesize_single_lesson
 
 IntentType = Literal["greeting", "learning_request", "command", "off_topic", "lesson_answer"]
 
@@ -86,7 +86,7 @@ def _score_confusion_sync(lesson_content: str, learner_response: str, context: s
     try:
         llm = get_tool_llm()
         response = llm.invoke(prompt)
-        return float(response.content.strip())
+        return float(_extract_text(response))
     except (ValueError, Exception):
         return 0.5
 
@@ -109,6 +109,6 @@ def _simplify_lesson_sync(content: str, context: str) -> str:
     try:
         llm = get_tool_llm()
         response = llm.invoke(prompt)
-        return response.content.strip()
+        return _extract_text(response)
     except Exception as e:
         return f"{content}\n\n_(Simplified version unavailable: {e})_"

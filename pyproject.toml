@@ -31,8 +31,10 @@ dependencies = [
     # AI / NLP - Updated versions with Python 3.13 support
     "langchain>=0.3.0",
     "langchain-core>=0.3.0",
-    "langchain-google-genai>=2.0.0",
+    "langchain-google-genai>=4.2.0",
     "langgraph>=0.2.0",
+    "langgraph-checkpoint-postgres",
+    "psycopg[binary,pool]>=3.0",
     "tavily-python>=0.3.0",
     "gpt4all>=2.7.0",
     "transformers>=4.45.0",

@@ -1,19 +1,19 @@
 """
-Meta WhatsApp webhook — receives incoming messages, routes, and replies via API.
+Meta WhatsApp webhook — invokes the LangGraph agent for every inbound message.
+
+On each POST the webhook checks whether the user's graph thread has a pending
+interrupt (outline review, waiting for start, lesson response).  If so it
+resumes; otherwise it starts a fresh graph run from classify_intent.
 """
 
 import logging
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Query, Request
 from fastapi.responses import PlainTextResponse
-from sqlalchemy.ext.asyncio import AsyncSession
+from langchain_core.messages import HumanMessage
+from langgraph.types import Command
 
 from app.config import settings
-from app.database import get_db
-from app.orchestrator import analyse
-from app.router import route_message
-from app.services import get_or_create_user
-from app.whatsapp import send_message
 
 logger = logging.getLogger(__name__)
 webhook_router = APIRouter()
@@ -33,11 +33,8 @@ async def verify_webhook(
 
 
 @webhook_router.post("/webhook")
-async def whatsapp_webhook(
-    request: Request,
-    db: AsyncSession = Depends(get_db),
-):
-    """Handle incoming WhatsApp messages from Meta."""
+async def whatsapp_webhook(request: Request):
+    """Handle incoming WhatsApp messages via the LangGraph agent."""
     data = await request.json()
 
     try:
@@ -45,19 +42,13 @@ async def whatsapp_webhook(
         changes = entry.get("changes", [])[0]
         value = changes.get("value", {})
 
-        # We only care about messages, ignore statuses
         if "messages" not in value:
             return {"status": "ok"}
 
         message_info = value["messages"][0]
         phone = message_info.get("from", "").strip()
 
-        # Extract body based on message type
         msg_type = message_info.get("type", "text")
-        body = ""
-        media_url = None
-        media_content_type = None
-
         if msg_type == "text":
             body = message_info.get("text", {}).get("body", "")
         else:
@@ -65,24 +56,31 @@ async def whatsapp_webhook(
 
         logger.info("WhatsApp webhook: from=%s body=%r", phone, (body or "")[:80])
 
-        user = await get_or_create_user(db, phone)
+        graph = request.app.state.graph
+        config = {"configurable": {"thread_id": phone}}
 
-        # Orchestrate: single LLM call → intent + sentiment + enriched_context
-        result = await analyse(body, user.wa_session_state or "idle")
-        logger.info("Orchestrator: intent=%s sentiment=%s", result.intent, result.sentiment)
-
-        reply_text, reply_media = await route_message(
-            db, user, body, media_url, media_content_type, result
+        state_snapshot = await graph.aget_state(config)
+        has_interrupt = bool(state_snapshot.tasks) and any(
+            t.interrupts for t in state_snapshot.tasks
         )
-        logger.info("Sending reply to %s: %r", phone, (reply_text or "")[:80])
 
-        try:
-            await send_message(phone, reply_text, reply_media)
-        except Exception as e:
-            logger.exception("Meta send_message failed: %s", e)
-            return {"status": "ok", "error": str(e)}
+        if has_interrupt:
+            logger.info("Resuming interrupt for %s", phone)
+            await graph.ainvoke(
+                Command(resume={"user_message": body}),
+                config=config,
+            )
+        else:
+            logger.info("New graph run for %s", phone)
+            await graph.ainvoke(
+                {
+                    "messages": [HumanMessage(content=body)],
+                    "phone_number": phone,
+                },
+                config=config,
+            )
 
     except Exception as e:
-        logger.warning("Error parsing Meta webhook payload: %s", e)
+        logger.exception("Error in webhook: %s", e)
 
     return {"status": "ok"}

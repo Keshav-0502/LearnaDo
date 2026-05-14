@@ -12,6 +12,17 @@ from tavily import TavilyClient
 load_dotenv()
 
 
+def _extract_text(response) -> str:
+    """Extract plain text from a v4 AIMessage whose content may be a list of blocks."""
+    raw = response.content
+    if isinstance(raw, list):
+        return next(
+            (b["text"] for b in raw if isinstance(b, dict) and b.get("type") == "text"),
+            "",
+        ).strip()
+    return str(raw).strip()
+
+
 def _get_gemini_api_key() -> str:
     """Prefer app config so webhook can use GEMINI_API_KEY or GOOGLE_API_KEY."""
     try:
@@ -65,9 +76,7 @@ Generate the outline now:"""
         tool_llm = get_tool_llm()
         response = tool_llm.invoke(prompt)
 
-        # Extract JSON from response
-        raw = response.content
-        content = (raw if isinstance(raw, str) else str(raw)).strip()
+        content = _extract_text(response)
 
         # Remove markdown code blocks if present
         if content.startswith("```"):
@@ -167,7 +176,7 @@ def get_tool_llm():
     if _tool_llm is None:
         api_key = _get_gemini_api_key()
         # 2026 recommendation: Gemini 2.5 Flash for low-latency/high-volume tasks.
-        _tool_llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", google_api_key=api_key)
+        _tool_llm = ChatGoogleGenerativeAI(model="gemini-3-flash-preview", api_key=api_key)
     return _tool_llm
 
 
@@ -176,7 +185,7 @@ def get_main_llm():
     global _main_llm
     if _main_llm is None:
         api_key = _get_gemini_api_key()
-        _main_llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", google_api_key=api_key)
+        _main_llm = ChatGoogleGenerativeAI(model="gemini-3-flash-preview", api_key=api_key)
     return _main_llm
 
 
@@ -276,9 +285,7 @@ Generate the lesson now:"""
         tool_llm = get_tool_llm()  # Use Tool LLM for better quality
         response = tool_llm.invoke(prompt)
 
-        # Extract JSON from response
-        raw = response.content
-        content = (raw if isinstance(raw, str) else str(raw)).strip()
+        content = _extract_text(response)
 
         # Remove markdown code blocks if present
         if content.startswith("```"):
@@ -462,8 +469,7 @@ Return ONLY the lesson text — no JSON, no markdown headers, no extra formattin
     try:
         llm = get_tool_llm()
         response = llm.invoke(prompt)
-        raw = response.content
-        return (raw if isinstance(raw, str) else str(raw)).strip()
+        return _extract_text(response)
     except Exception as e:
         return (
             f"*{lesson_title}*\n\n"
