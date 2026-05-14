@@ -58,6 +58,16 @@ async def whatsapp_webhook(request: Request):
 
         logger.info("WhatsApp webhook: from=%s body=%r", phone, (body or "")[:80])
 
+        # Persist incoming message to DB
+        try:
+            from app.database import AsyncSessionLocal
+            from app import services
+
+            async with AsyncSessionLocal() as db:
+                await services.save_message(db, phone, "user", body)
+        except Exception:
+            logger.debug("Failed to save incoming message to DB", exc_info=True)
+
         graph = request.app.state.graph
         config = {"configurable": {"thread_id": phone}}
 

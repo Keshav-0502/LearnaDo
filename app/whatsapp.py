@@ -57,4 +57,21 @@ async def send_message(
             if "messages" in data and len(data["messages"]) > 0:
                 last_msg_id = data["messages"][0].get("id", "")
 
+    # Persist outgoing message to DB
+    try:
+        from app.database import AsyncSessionLocal
+        from app import services
+
+        async with AsyncSessionLocal() as db:
+            await services.save_message(
+                db,
+                to_phone,
+                "assistant",
+                body,
+                wa_message_id=last_msg_id,
+                media_type="image" if media_url else None,
+            )
+    except Exception:
+        logger.debug("Failed to save outgoing message to DB", exc_info=True)
+
     return last_msg_id

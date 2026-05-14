@@ -7,7 +7,7 @@ import uuid
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import Lesson, Mission, User, UserProgress
+from app.models import Lesson, Message, Mission, User, UserProgress
 
 
 async def get_or_create_user(db: AsyncSession, phone: str) -> User:
@@ -189,3 +189,28 @@ async def get_mission_progress_summary(db: AsyncSession, mission_id: uuid.UUID) 
         "completed": len(completed),
         "remaining": len(lessons) - len(completed),
     }
+
+
+async def save_message(
+    db: AsyncSession,
+    phone: str,
+    role: str,
+    content: str,
+    mission_id: uuid.UUID | None = None,
+    wa_message_id: str | None = None,
+    media_type: str | None = None,
+) -> Message:
+    """Persist a chat message (incoming or outgoing) to the messages table."""
+    user = await get_or_create_user(db, phone)
+
+    msg = Message(
+        user_id=user.id,
+        mission_id=mission_id,
+        role=role,
+        content=content[:10000],
+        wa_message_id=wa_message_id,
+        media_type=media_type,
+    )
+    db.add(msg)
+    await db.commit()
+    return msg
