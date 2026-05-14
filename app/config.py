@@ -9,9 +9,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
-    # Google / Gemini (either key works for Gemini API)
-    google_api_key: str = ""
-    gemini_api_key: str = ""
+    # Anthropic
+    anthropic_api_key: str = ""
 
     # Tavily
     tavily_api_key: str = ""

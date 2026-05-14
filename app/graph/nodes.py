@@ -14,7 +14,7 @@ from typing import Literal
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_core.messages.utils import count_tokens_approximately, trim_messages
-from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_anthropic import ChatAnthropic
 from langgraph.types import interrupt
 from pydantic import BaseModel, Field
 
@@ -34,19 +34,19 @@ def _get_api_key() -> str:
     try:
         from app.config import settings
 
-        key = settings.gemini_api_key or settings.google_api_key
+        key = settings.anthropic_api_key
         if key:
             return key
     except Exception:
         pass
-    return os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY") or ""
+    return os.getenv("ANTHROPIC_API_KEY") or ""
 
 
 def _get_llm():
     global _llm
     if _llm is None:
-        _llm = ChatGoogleGenerativeAI(
-            model="gemini-3-flash-preview", api_key=_get_api_key()
+        _llm = ChatAnthropic(
+            model="claude-haiku-4-5-20251001", api_key=_get_api_key()
         )
     return _llm
 
@@ -113,10 +113,11 @@ async def classify_intent(state: LearnaDoState) -> dict:
         f'Message: "{last_msg}"\n\n'
         "Intent categories:\n"
         "- greeting: Saying hello, hi, how are you, or introducing themselves.\n"
-        "- learning_request: Wants to learn a topic. Phrases like "
+        "- learning_request: Wants to learn a topic, OR wants someone else to "
+        'learn a topic (e.g. "teach my friend about X", "I want Naman to learn Y", '
+        '"send a lesson on Z to 98378..."). Phrases like '
         '"teach me", "explain", "I want to understand", or just a bare topic name.\n'
-        "- command: Reset, help, start, yes, no, cancel, continue, resume, "
-        "or requests to send a lesson to someone else.\n"
+        "- command: Reset, help, start, yes, no, cancel, continue, resume.\n"
         "- off_topic: Questions about the bot itself, or anything unrelated to learning.\n"
         "- lesson_answer: A direct response to lesson content."
     )
@@ -305,9 +306,8 @@ async def create_mission(state: LearnaDoState) -> dict:
             await services.activate_mission(db, mission, learner or user)
             await send_message(
                 phone,
-                f"Your *{topic}* mission is ready!\n\n"
-                f"{len(outline)} lessons waiting for you.\n\n"
-                "Reply *start* when you're ready to begin!",
+                f"Your *{topic}* mission is ready! "
+                f"{len(outline)} lessons — let's begin!",
             )
             return {
                 "mission_id": str(mission.id),
@@ -390,6 +390,10 @@ async def deliver_lesson(state: LearnaDoState) -> dict:
     sentiment = state.get("sentiment", "neutral")
     enriched = _SENTIMENT_CONTEXT.get(sentiment, "")
 
+    image_url: str | None = None
+    youtube_url: str | None = None
+    sources: list[dict] = []
+
     async with AsyncSessionLocal() as db:
         user = await services.get_or_create_user(db, phone)
         mission = await services.get_mission_by_id(db, mission_id)
@@ -406,10 +410,13 @@ async def deliver_lesson(state: LearnaDoState) -> dict:
                 phone, f"Loading lesson *{lesson.title}*... one moment!"
             )
             try:
-                content = await get_lesson_content(
+                result = await get_lesson_content(
                     mission.topic, lesson.title, "", context=enriched
                 )
-                lesson.content_md = content
+                lesson.content_md = result.get("content", "")
+                image_url = result.get("image_url")
+                youtube_url = result.get("youtube_url")
+                sources = result.get("sources", [])
                 await db.commit()
             except Exception as e:
                 await send_message(
@@ -430,11 +437,17 @@ async def deliver_lesson(state: LearnaDoState) -> dict:
             "Reply with what you understood from this lesson."
         )
 
-        await send_message(phone, reply)
+        if image_url:
+            await send_message(phone, reply, media_url=image_url)
+        else:
+            await send_message(phone, reply)
 
         return {
             "lesson_id": str(lesson.id),
             "lesson_content": lesson.content_md,
+            "lesson_image_url": image_url or "",
+            "lesson_youtube_url": youtube_url or "",
+            "lesson_sources": sources,
             "attempts": 0,
             "messages": [AIMessage(content=reply)],
         }

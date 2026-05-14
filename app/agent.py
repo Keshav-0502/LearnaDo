@@ -5,7 +5,7 @@ from datetime import datetime
 from typing import TypedDict
 
 from dotenv import load_dotenv
-from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_anthropic import ChatAnthropic
 from langgraph.graph import END, START, StateGraph
 from tavily import TavilyClient
 
@@ -23,19 +23,19 @@ def _extract_text(response) -> str:
     return str(raw).strip()
 
 
-def _get_gemini_api_key() -> str:
-    """Prefer app config so webhook can use GEMINI_API_KEY or GOOGLE_API_KEY."""
+def _get_anthropic_api_key() -> str:
+    """Prefer app config so webhook can use ANTHROPIC_API_KEY."""
     try:
         from app.config import settings
 
-        key = settings.gemini_api_key or settings.google_api_key
+        key = settings.anthropic_api_key
         if key:
             return key
     except Exception:
         pass
-    key = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
+    key = os.getenv("ANTHROPIC_API_KEY")
     if not key:
-        raise ValueError("GOOGLE_API_KEY or GEMINI_API_KEY not set")
+        raise ValueError("ANTHROPIC_API_KEY not set")
     return key
 
 
@@ -174,9 +174,8 @@ def get_tool_llm():
     """Get or initialize the tool LLM instance."""
     global _tool_llm
     if _tool_llm is None:
-        api_key = _get_gemini_api_key()
-        # 2026 recommendation: Gemini 2.5 Flash for low-latency/high-volume tasks.
-        _tool_llm = ChatGoogleGenerativeAI(model="gemini-3-flash-preview", api_key=api_key)
+        api_key = _get_anthropic_api_key()
+        _tool_llm = ChatAnthropic(model="claude-haiku-4-5-20251001", api_key=api_key)
     return _tool_llm
 
 
@@ -184,8 +183,8 @@ def get_main_llm():
     """Get or initialize the main LLM instance."""
     global _main_llm
     if _main_llm is None:
-        api_key = _get_gemini_api_key()
-        _main_llm = ChatGoogleGenerativeAI(model="gemini-3-flash-preview", api_key=api_key)
+        api_key = _get_anthropic_api_key()
+        _main_llm = ChatAnthropic(model="claude-haiku-4-5-20251001", api_key=api_key)
     return _main_llm
 
 
@@ -211,7 +210,7 @@ def generate_outline_from_topic(topic: str) -> list[dict]:
         if outline_strings:
             return [{"title": t, "description": ""} for t in outline_strings]
     except Exception:
-        # Fallback outline if Gemini is rate-limited / misconfigured.
+        # Fallback outline if Claude is rate-limited / misconfigured.
         pass
 
     base = topic.strip() or "the topic"
@@ -427,26 +426,59 @@ def run_cli():
         print("\n⚠️  No lessons were generated.")
 
 
-def synthesize_single_lesson(topic: str, lesson_title: str, description: str) -> str:
+def synthesize_single_lesson(topic: str, lesson_title: str, description: str) -> dict:
     """
-    Callable by agent_bridge. Runs Tavily search + Gemini synthesis
-    for a single lesson and returns the lesson content as a plain string.
-    """
-    tavily_api_key = os.getenv("TAVILY_API_KEY") or ""
-    try:
-        from app.config import settings as _s
+    Callable by agent_bridge. Runs Tavily search (with images) + YouTube
+    context + Claude synthesis. Returns a dict::
 
-        tavily_api_key = _s.tavily_api_key or tavily_api_key
-    except Exception:
-        pass
+        {
+            "content": str,           # lesson text with inline citations
+            "image_url": str | None,  # best Tavily image for this lesson
+            "youtube_url": str | None,
+            "sources": [{"title": str, "url": str}, ...]
+        }
+    """
+    from app.tools import _search_web_sync, _get_youtube_context_sync
 
     query = f"{topic} {lesson_title}"
-    topic_facts: dict = {}
-    try:
-        client = TavilyClient(tavily_api_key)
-        topic_facts = client.search(query=query, search_depth="advanced", max_results=5)
-    except Exception as e:
-        topic_facts = {"error": str(e)}
+
+    web = _search_web_sync(query, max_results=5, include_images=True)
+    yt_videos = _get_youtube_context_sync(query, max_videos=2)
+
+    # Pick the best image URL
+    image_url: str | None = None
+    for img in web.get("images", []):
+        url = img.get("url") if isinstance(img, dict) else img
+        if url and isinstance(url, str):
+            image_url = url
+            break
+
+    # Pick the best YouTube video
+    youtube_url: str | None = None
+    yt_context_block = ""
+    if yt_videos:
+        best = yt_videos[0]
+        youtube_url = best.get("url")
+        snippet = best.get("transcript_snippet", "")[:600]
+        if snippet:
+            yt_context_block = (
+                f"\n\nYouTube video context ({best.get('title', '')}):\n{snippet}"
+            )
+
+    # Build sources list for citations
+    sources: list[dict] = []
+    for r in web.get("results", []):
+        if r.get("url"):
+            sources.append({"title": r.get("title", ""), "url": r["url"]})
+
+    research_text = json.dumps(
+        [{"title": r.get("title"), "content": r.get("content", "")[:400]} for r in web.get("results", [])],
+        indent=2,
+    )
+
+    yt_ref = ""
+    if youtube_url:
+        yt_ref = f'\n- Reference the YouTube video: "Watch: {yt_videos[0].get("title", "video")} — {youtube_url}"'
 
     prompt = f"""You are a helpful teacher writing a short WhatsApp-friendly micro-lesson.
 
@@ -455,28 +487,38 @@ Lesson: {lesson_title}
 {f"Context: {description}" if description else ""}
 
 Research material:
-{json.dumps(topic_facts, indent=2)}
+{research_text}{yt_context_block}
 
 Instructions:
 1. Write 2-3 short paragraphs explaining this lesson clearly
 2. Use plain, simple language — no jargon
 3. Include one real-life example
-4. End with ONE short question to check understanding (e.g. "Quick check: ...")
-5. Keep total length under 800 characters (WhatsApp-friendly)
+4. Cite your sources inline (e.g. "According to [Source Name]...")
+5. At the end, add a "Sources:" section with numbered links{yt_ref}
+6. End with ONE short question to check understanding (e.g. "Quick check: ...")
+7. Keep total length under 1200 characters (WhatsApp-friendly)
+8. Use WhatsApp formatting: *bold*, _italic_
 
 Return ONLY the lesson text — no JSON, no markdown headers, no extra formatting."""
 
     try:
         llm = get_tool_llm()
         response = llm.invoke(prompt)
-        return _extract_text(response)
+        content = _extract_text(response)
     except Exception as e:
-        return (
+        content = (
             f"*{lesson_title}*\n\n"
             f"This lesson covers {lesson_title} as part of {topic}.\n\n"
             f"_(Full content unavailable right now: {e})_\n\n"
             "Quick check: What do you already know about this topic?"
         )
+
+    return {
+        "content": content,
+        "image_url": image_url,
+        "youtube_url": youtube_url,
+        "sources": sources,
+    }
 
 
 if __name__ == "__main__":

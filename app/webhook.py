@@ -47,6 +47,8 @@ async def whatsapp_webhook(request: Request):
 
         message_info = value["messages"][0]
         phone = message_info.get("from", "").strip()
+        if phone and not phone.startswith("+"):
+            phone = "+" + phone
 
         msg_type = message_info.get("type", "text")
         if msg_type == "text":

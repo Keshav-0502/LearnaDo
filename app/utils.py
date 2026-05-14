@@ -21,26 +21,26 @@ from pathlib import Path
 import pymupdf
 import pytesseract
 from dotenv import load_dotenv
-from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_anthropic import ChatAnthropic
 from PIL import Image
 
 load_dotenv()
 
-# Initialize Gemini LLM lazily
+# Initialize Claude LLM lazily
 _llm = None
 
 
 def get_llm():
-    """Get or initialize the Gemini LLM instance."""
+    """Get or initialize the Claude LLM instance."""
     global _llm
     if _llm is None:
-        google_api_key = os.getenv("GOOGLE_API_KEY")
-        if not google_api_key:
+        anthropic_api_key = os.getenv("ANTHROPIC_API_KEY")
+        if not anthropic_api_key:
             raise ValueError(
-                "GOOGLE_API_KEY not found in environment variables. "
+                "ANTHROPIC_API_KEY not found in environment variables. "
                 "Please set it in your .env file or environment."
             )
-        _llm = ChatGoogleGenerativeAI(model="gemini-3-flash-preview", api_key=google_api_key)
+        _llm = ChatAnthropic(model="claude-haiku-4-5-20251001", api_key=anthropic_api_key)
     return _llm
 
 
@@ -64,7 +64,7 @@ def extract_text_from_pdf(pdf_path: str) -> str:
 
 def process_image(file_path: str, user_query: str) -> str:
     """
-    Extract text with Tesseract, send both extracted text and image to Gemini.
+    Extract text with Tesseract, send both extracted text and image to Claude.
     """
     if not Path(file_path).exists():
         raise FileNotFoundError(f"Image file not found: {file_path}")
@@ -73,7 +73,7 @@ def process_image(file_path: str, user_query: str) -> str:
         # OCR with Tesseract
         extracted_text = pytesseract.image_to_string(Image.open(file_path))
 
-        # Send both to Gemini (multimodal input: text + image)
+        # Send both to Claude (multimodal input: text + image)
         llm = get_llm()
         response = llm.invoke(
             [
@@ -96,7 +96,7 @@ def process_image(file_path: str, user_query: str) -> str:
 
 def query_audio(file_path: str, question: str) -> str:
     """
-    Transcribe audio with Whisper, then send transcription + question to Gemini.
+    Transcribe audio with Whisper, then send transcription + question to Claude.
     """
     if not Path(file_path).exists():
         raise FileNotFoundError(f"Audio file not found: {file_path}")

@@ -22,11 +22,18 @@ async def get_outline(topic: str) -> list[dict]:
 
 async def get_lesson_content(
     topic: str, lesson_title: str, description: str, context: str = ""
-) -> str:
+) -> dict:
     """
-    Generate full lesson content for one lesson node. Returns plain text.
-    ``context`` is an enriched_context string from the orchestrator that is
-    prepended to the synthesis prompt to influence tone/difficulty.
+    Generate lesson content with images, YouTube, and citations.
+
+    Returns::
+
+        {
+            "content": str,
+            "image_url": str | None,
+            "youtube_url": str | None,
+            "sources": [{"title": str, "url": str}, ...]
+        }
     """
     loop = asyncio.get_event_loop()
     return await loop.run_in_executor(
@@ -34,13 +41,8 @@ async def get_lesson_content(
     )
 
 
-def _get_lesson_content_sync(topic: str, lesson_title: str, description: str, context: str) -> str:
-    """Sync wrapper that injects context before delegating to synthesize_single_lesson."""
-    # synthesize_single_lesson builds its own prompt internally, so we wrap the
-    # result with a context-aware preamble passed via a thin shim prompt when
-    # context is non-empty.  For simplicity, and to avoid modifying agent.py,
-    # we call synthesize_single_lesson and post-process only if needed.
-    # A cleaner approach: pass context as a prefix via description.
+def _get_lesson_content_sync(topic: str, lesson_title: str, description: str, context: str) -> dict:
+    """Sync wrapper — injects context then delegates to synthesize_single_lesson."""
     enriched_description = f"{context}\n{description}".strip() if context else description
     return synthesize_single_lesson(topic, lesson_title, enriched_description)
 
@@ -48,7 +50,7 @@ def _get_lesson_content_sync(topic: str, lesson_title: str, description: str, co
 async def score_confusion(lesson_content: str, learner_response: str, context: str = "") -> float:
     """
     Returns 0.0 (fully understood) → 1.0 (completely confused).
-    Uses Gemini Flash — no Tavily needed.
+    Uses Claude Haiku — no Tavily needed.
     ``context`` is an enriched_context string prepended to the evaluation prompt.
     """
     loop = asyncio.get_event_loop()

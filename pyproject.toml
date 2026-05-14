@@ -31,11 +31,11 @@ dependencies = [
     # AI / NLP - Updated versions with Python 3.13 support
     "langchain>=0.3.0",
     "langchain-core>=0.3.0",
-    "langchain-google-genai>=4.2.0",
     "langgraph>=0.2.0",
     "langgraph-checkpoint-postgres",
     "psycopg[binary,pool]>=3.0",
     "tavily-python>=0.3.0",
+    "youtube-transcript-api>=1.0.0",
     "gpt4all>=2.7.0",
     "transformers>=4.45.0",
     "sentence-transformers>=3.0.1",
@@ -58,6 +58,7 @@ dependencies = [
     "psycopg2-binary>=2.9.11",
     "pydantic-settings>=2.13.1",
     "twilio>=9.10.3",
+    "langchain-anthropic>=1.4.3",
 ]
 
 [project.optional-dependencies]

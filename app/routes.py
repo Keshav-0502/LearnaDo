@@ -56,7 +56,7 @@ async def pdf_query(file: UploadFile = File(...), question: str = Form(...)):
 @router.post("/image-query")
 async def image_query(file: UploadFile = File(...), query: str = Form("Describe this image")):
     """
-    Upload an image → OCR with Tesseract → send text+image to Gemini.
+    Upload an image → OCR with Tesseract → send text+image to Claude.
     """
     try:
         file_path = UPLOAD_DIR / file.filename
@@ -73,7 +73,7 @@ async def image_query(file: UploadFile = File(...), query: str = Form("Describe 
 @router.post("/audio-query")
 async def audio_query(file: UploadFile = File(...), question: str = Form(...)):
     """
-    Upload audio → Whisper transcription → ask Gemini about it.
+    Upload audio → Whisper transcription → ask Claude about it.
     """
     try:
         file_path = UPLOAD_DIR / file.filename

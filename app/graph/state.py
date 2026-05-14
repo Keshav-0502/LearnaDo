@@ -32,6 +32,9 @@ class LearnaDoState(MessagesState):
     # Set by deliver_lesson
     lesson_id: str
     lesson_content: str
+    lesson_image_url: str
+    lesson_youtube_url: str
+    lesson_sources: list[dict]
 
     # Set by wait_for_response
     user_response: str

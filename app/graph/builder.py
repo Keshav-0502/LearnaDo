@@ -7,7 +7,7 @@ Graph topology:
     ├── learning_request      → extract_lesson_info → generate_outline
     │       → (outline ok?) → review_outline → (approved?)
     │           ├── yes → create_mission → (single/dual?)
-    │           │     ├── single → wait_for_start → deliver_lesson ─┐
+    │           │     ├── single → deliver_lesson (immediate) ──────┐
     │           │     └── dual   → END (goal-setter done)           │
     │           └── no  → cancelled_node → END                      │
     └── command / lesson_answer → lesson_handler → (has mission?)   │
@@ -57,7 +57,7 @@ def _route_after_review(state: LearnaDoState) -> str:
 def _route_after_create_mission(state: LearnaDoState) -> str:
     flow = state.get("flow")
     if flow == "single":
-        return "wait_for_start"
+        return "deliver_lesson"
     return END
 
 
