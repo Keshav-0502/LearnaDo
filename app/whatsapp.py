@@ -1,25 +1,15 @@
 """
-Twilio WhatsApp send logic; kept separate from webhook routing.
+Meta WhatsApp send logic; kept separate from webhook routing.
 """
 
-import asyncio
+import logging
 from typing import Any
 
-from twilio.rest import Client
+import httpx
 
 from app.config import settings
 
-_client: Client | None = None
-
-
-def get_twilio_client() -> Client:
-    global _client
-    if not _client:
-        _client = Client(
-            settings.twilio_account_sid,
-            settings.twilio_auth_token,
-        )
-    return _client
+logger = logging.getLogger(__name__)
 
 
 async def send_message(
@@ -27,27 +17,45 @@ async def send_message(
     body: str,
     media_url: str | None = None,
 ) -> str:
-    """Send a WhatsApp message. to_phone should be plain e.g. +917042881303."""
-    # Twilio WhatsApp has a strict body limit (~1600 chars). Split proactively.
-    # Keep chunks a bit smaller to avoid edge cases with encoding/concat.
-    max_len = 1500
+    """Send a WhatsApp message via Meta Cloud API."""
+    if not settings.whatsapp_access_token or not settings.whatsapp_phone_number_id:
+        logger.warning("Meta WhatsApp credentials not configured.")
+        return ""
+
+    url = f"https://graph.facebook.com/v19.0/{settings.whatsapp_phone_number_id}/messages"
+    headers = {
+        "Authorization": f"Bearer {settings.whatsapp_access_token}",
+        "Content-Type": "application/json",
+
+    }
+
+    # Meta has a 4096 character limit
+    max_len = 4096
     chunks = [body[i : i + max_len] for i in range(0, len(body), max_len)] or [""]
 
-    last_sid = ""
-    for i, chunk in enumerate(chunks):
-        kwargs: dict[str, Any] = {
-            "from_": settings.twilio_whatsapp_from,
-            "to": f"whatsapp:{to_phone}",
-            "body": chunk,
-        }
-        # Only attach media to the first chunk
-        if media_url and i == 0:
-            kwargs["media_url"] = [media_url]
+    last_msg_id = ""
+    async with httpx.AsyncClient() as client:
+        for i, chunk in enumerate(chunks):
+            payload: dict[str, Any] = {
+                "messaging_product": "whatsapp",
+                "recipient_type": "individual",
+                "to": to_phone,
+            }
 
-        def _create() -> Any:
-            return get_twilio_client().messages.create(**kwargs)
+            if media_url and i == 0:
+                # If we have a media URL, send it as an image with caption
+                payload["type"] = "image"
+                payload["image"] = {"link": media_url}
+                if chunk:
+                    payload["image"]["caption"] = chunk
+            else:
+                payload["type"] = "text"
+                payload["text"] = {"preview_url": False, "body": chunk}
 
-        msg = await asyncio.to_thread(_create)
-        last_sid = msg.sid
+            response = await client.post(url, headers=headers, json=payload)
+            response.raise_for_status()
+            data = response.json()
+            if "messages" in data and len(data["messages"]) > 0:
+                last_msg_id = data["messages"][0].get("id", "")
 
-    return last_sid
+    return last_msg_id

@@ -18,8 +18,8 @@ import pytesseract
 from PIL import Image
 from dotenv import load_dotenv
 from langchain_google_genai import ChatGoogleGenerativeAI
-import whisper
-import torch
+# import whisper
+# import torch
 from pathlib import Path
 
 load_dotenv()
@@ -107,9 +107,6 @@ def query_pdf(pdf_path: str, question: str) -> str:
     res = llm.invoke(question + "\n\n" + content)
     return res.content
 
-# Choose device (CUDA if available, else CPU)
-DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-
 # Lazy initialization for Whisper model
 _whisper_model = None
 
@@ -117,7 +114,13 @@ def get_whisper_model():
     """Get or initialize the Whisper model instance."""
     global _whisper_model
     if _whisper_model is None:
-        _whisper_model = whisper.load_model("base", device=DEVICE)
+        try:
+            import torch
+            import whisper
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+        except ImportError:
+            raise ImportError("Whisper or Torch is not installed. Please install them to use voice features.")
+        _whisper_model = whisper.load_model("base", device=device)
     return _whisper_model
 
 def transcribe_audio(file_path: str) -> str:
@@ -151,8 +154,24 @@ def transcribe_audio(file_path: str) -> str:
 # - generate_unique_filename(): Create unique filenames
 # - get_mime_type(): Detect file MIME type
 
-# TODO: Text Processing Utilities
-# - clean_text(): Clean and normalize text
+# Text Processing Utilities
+
+import re
+
+
+def clean_text(text: str) -> str:
+    """
+    Strip, collapse whitespace, and remove characters irrelevant to NLP.
+    The original message body is preserved for LLM calls; use this only
+    for analysis/classification steps.
+    """
+    text = text.strip()
+    text = re.sub(r"\s+", " ", text)                    # collapse whitespace
+    text = re.sub(r"[^\w\s?.!,'\"@#\-]", "", text)     # drop noisy special chars
+    return text
+
+
+# TODO: Text Processing Utilities (remaining)
 # - extract_keywords(): Extract important keywords
 # - split_text_into_chunks(): Split large texts into manageable chunks
 # - merge_text_chunks(): Merge processed text chunks
