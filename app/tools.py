@@ -95,31 +95,47 @@ def _extract_video_id(url: str) -> str | None:
     return m.group(1) if m else None
 
 
-def _fetch_transcript_sync(video_id: str, max_words: int = 500) -> str:
-    """Fetch transcript for a single YouTube video. Returns first *max_words* words."""
+MAX_VIDEO_DURATION_SECS = 600  # 10 minutes — microlearning limit
+
+
+def _fetch_transcript_sync(
+    video_id: str, max_words: int = 500
+) -> tuple[str, float]:
+    """Fetch transcript for a YouTube video.
+
+    Returns (first *max_words* words of text, estimated duration in seconds).
+    Duration is derived from the last transcript segment's start time.
+    """
     try:
         from youtube_transcript_api import YouTubeTranscriptApi
 
         api = YouTubeTranscriptApi()
         transcript = api.fetch(video_id)
-        full_text = " ".join(snippet.text for snippet in transcript)
+        snippets = list(transcript)
+        full_text = " ".join(s.text for s in snippets)
         words = full_text.split()
-        return " ".join(words[:max_words])
+
+        duration_secs = 0.0
+        if snippets:
+            last = snippets[-1]
+            duration_secs = getattr(last, "start", 0.0) + getattr(last, "duration", 0.0)
+
+        return " ".join(words[:max_words]), duration_secs
     except Exception as exc:
         logger.debug("Transcript fetch failed for %s: %s", video_id, exc)
-        return ""
+        return "", 0.0
 
 
-async def fetch_transcript(video_id: str, max_words: int = 500) -> str:
+async def fetch_transcript(video_id: str, max_words: int = 500) -> tuple[str, float]:
     """Async wrapper around youtube-transcript-api."""
     loop = asyncio.get_event_loop()
     return await loop.run_in_executor(None, _fetch_transcript_sync, video_id, max_words)
 
 
 def _get_youtube_context_sync(query: str, max_videos: int = 2) -> list[dict]:
-    """Search YouTube via Tavily, then fetch transcripts for top results."""
+    """Search YouTube via Tavily, fetch transcripts, and filter out long videos."""
     search = _search_web_sync(
-        query, max_results=max_videos, include_images=False, include_domains=["youtube.com"]
+        query, max_results=max_videos + 2, include_images=False, include_domains=["youtube.com"]
     )
 
     videos: list[dict] = []
@@ -129,15 +145,26 @@ def _get_youtube_context_sync(query: str, max_videos: int = 2) -> list[dict]:
         if not vid:
             continue
 
-        transcript = _fetch_transcript_sync(vid, max_words=500)
+        transcript_text, duration_secs = _fetch_transcript_sync(vid, max_words=500)
+
+        if duration_secs > MAX_VIDEO_DURATION_SECS:
+            logger.debug(
+                "Skipping video %s (%.0fs > %ds limit)", vid, duration_secs, MAX_VIDEO_DURATION_SECS
+            )
+            continue
+
         videos.append(
             {
                 "url": url,
                 "title": result.get("title", ""),
                 "video_id": vid,
-                "transcript_snippet": transcript,
+                "transcript_snippet": transcript_text,
+                "duration_secs": duration_secs,
             }
         )
+
+        if len(videos) >= max_videos:
+            break
 
     return videos
 

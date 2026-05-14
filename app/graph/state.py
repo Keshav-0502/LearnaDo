@@ -39,6 +39,9 @@ class LearnaDoState(MessagesState):
     # Set by wait_for_response
     user_response: str
 
+    # Set by classify_lesson_response
+    lesson_response_type: str
+
     # Set by evaluate_response
     confusion_score: float
     attempts: int

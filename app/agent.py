@@ -445,13 +445,31 @@ def synthesize_single_lesson(topic: str, lesson_title: str, description: str) ->
     web = _search_web_sync(query, max_results=5, include_images=True)
     yt_videos = _get_youtube_context_sync(query, max_videos=2)
 
-    # Pick the best image URL
+    # Pick the best image URL, validating relevance via description
     image_url: str | None = None
     for img in web.get("images", []):
-        url = img.get("url") if isinstance(img, dict) else img
-        if url and isinstance(url, str):
-            image_url = url
-            break
+        if isinstance(img, dict):
+            url = img.get("url")
+            desc = img.get("description", "")
+        else:
+            url = img
+            desc = ""
+        if not url or not isinstance(url, str):
+            continue
+        if desc:
+            try:
+                check = get_tool_llm().invoke(
+                    f"Is this image relevant to a micro-lesson about "
+                    f'"{lesson_title}" (topic: {topic})?\n'
+                    f"Image description: {desc}\n"
+                    "Reply ONLY yes or no."
+                )
+                if "no" in _extract_text(check).lower():
+                    continue
+            except Exception:
+                pass
+        image_url = url
+        break
 
     # Pick the best YouTube video
     youtube_url: str | None = None
@@ -472,7 +490,10 @@ def synthesize_single_lesson(topic: str, lesson_title: str, description: str) ->
             sources.append({"title": r.get("title", ""), "url": r["url"]})
 
     research_text = json.dumps(
-        [{"title": r.get("title"), "content": r.get("content", "")[:400]} for r in web.get("results", [])],
+        [
+            {"title": r.get("title"), "url": r.get("url", ""), "content": r.get("content", "")[:400]}
+            for r in web.get("results", [])
+        ],
         indent=2,
     )
 
@@ -494,9 +515,12 @@ Instructions:
 2. Use plain, simple language — no jargon
 3. Include one real-life example
 4. Cite your sources inline (e.g. "According to [Source Name]...")
-5. At the end, add a "Sources:" section with numbered links{yt_ref}
+5. At the end, add a "Sources:" section with the full URL for each source, like:
+   Sources:
+   1. Source Title — https://example.com/article
+   2. Another Source — https://example.com/page{yt_ref}
 6. End with ONE short question to check understanding (e.g. "Quick check: ...")
-7. Keep total length under 1200 characters (WhatsApp-friendly)
+7. Keep total length under 1500 characters (WhatsApp-friendly)
 8. Use WhatsApp formatting: *bold*, _italic_
 
 Return ONLY the lesson text — no JSON, no markdown headers, no extra formatting."""

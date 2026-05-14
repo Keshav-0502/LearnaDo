@@ -16,11 +16,16 @@ Graph topology:
                                               ↓
                               wait_for_response (interrupt)
                                               ↓
-                              evaluate_response → (confused?)
-                                ├── yes → simplify_node → wait_for_response (loop)
-                                └── no  → advance_lesson → (more lessons?)
-                                            ├── yes → deliver_lesson (loop)
-                                            └── no  → mission_complete → END
+                              classify_lesson_response → (type?)
+                                ├── question / more_detail → tutor_respond
+                                │                              → wait_for_response (loop)
+                                ├── simplify_request → simplify_node
+                                │                        → wait_for_response (loop)
+                                └── lesson_answer → evaluate_response → (confused?)
+                                      ├── yes → simplify_node → wait_for_response
+                                      └── no  → advance_lesson → (more lessons?)
+                                                  ├── yes → deliver_lesson (loop)
+                                                  └── no  → mission_complete → END
 """
 
 from langgraph.checkpoint.base import BaseCheckpointSaver
@@ -79,6 +84,17 @@ def _route_after_deliver(state: LearnaDoState) -> str:
     return "mission_complete"
 
 
+def _route_after_lesson_classify(state: LearnaDoState) -> str:
+    rtype = state.get("lesson_response_type", "lesson_answer")
+    if rtype in ("question", "more_detail"):
+        return "tutor_respond"
+    if rtype == "simplify_request":
+        return "simplify_node"
+    if rtype == "skip":
+        return "advance_lesson"
+    return "evaluate_response"
+
+
 def _route_after_evaluate(state: LearnaDoState) -> str:
     if state.get("should_simplify"):
         return "simplify_node"
@@ -108,6 +124,8 @@ def build_graph(checkpointer: BaseCheckpointSaver | None = None):
     builder.add_node("lesson_handler", nodes.lesson_handler)
     builder.add_node("deliver_lesson", nodes.deliver_lesson)
     builder.add_node("wait_for_response", nodes.wait_for_response)
+    builder.add_node("classify_lesson_response", nodes.classify_lesson_response)
+    builder.add_node("tutor_respond", nodes.tutor_respond)
     builder.add_node("evaluate_response", nodes.evaluate_response)
     builder.add_node("simplify_node", nodes.simplify_node)
     builder.add_node("advance_lesson", nodes.advance_lesson)
@@ -132,7 +150,9 @@ def build_graph(checkpointer: BaseCheckpointSaver | None = None):
     builder.add_conditional_edges("lesson_handler", _route_after_lesson_handler)
 
     builder.add_conditional_edges("deliver_lesson", _route_after_deliver)
-    builder.add_edge("wait_for_response", "evaluate_response")
+    builder.add_edge("wait_for_response", "classify_lesson_response")
+    builder.add_conditional_edges("classify_lesson_response", _route_after_lesson_classify)
+    builder.add_edge("tutor_respond", "wait_for_response")
 
     builder.add_conditional_edges("evaluate_response", _route_after_evaluate)
     builder.add_edge("simplify_node", "wait_for_response")

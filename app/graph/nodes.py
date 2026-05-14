@@ -86,6 +86,22 @@ class _LessonRequest(BaseModel):
     )
 
 
+class _LessonResponseType(BaseModel):
+    response_type: Literal[
+        "lesson_answer", "question", "more_detail", "simplify_request", "skip"
+    ] = Field(
+        description=(
+            "Type of learner message during a lesson. "
+            "'lesson_answer' = attempting to answer the comprehension check. "
+            "'question' = asking a follow-up question about the lesson content. "
+            "'more_detail' = requesting more examples or deeper explanation. "
+            "'simplify_request' = asking for a simpler explanation. "
+            "'skip' = wants to move on to the next lesson (e.g. 'next', 'skip', "
+            "'continue', 'move on', 'I already know this', 'got it lets move on')."
+        )
+    )
+
+
 _SENTIMENT_CONTEXT: dict[str, str] = {
     "frustrated": "User seems frustrated. Be very patient, keep response short and encouraging.",
     "confused": "User seems confused. Simplify language, use a basic example.",
@@ -434,7 +450,7 @@ async def deliver_lesson(state: LearnaDoState) -> dict:
             f"*{lesson.title}*\n\n"
             f"{lesson.content_md}\n\n"
             "---\n"
-            "Reply with what you understood from this lesson."
+            "Feel free to ask questions, or tell me what you took away from this!"
         )
 
         if image_url:
@@ -461,6 +477,98 @@ async def wait_for_response(state: LearnaDoState) -> dict:
         "user_response": msg,
         "messages": [HumanMessage(content=msg)],
     }
+
+
+async def classify_lesson_response(state: LearnaDoState) -> dict:
+    """Classify what the learner is doing: answering, asking, or requesting help."""
+    user_response = state.get("user_response", "")
+    lesson_content = state.get("lesson_content", "")[:500]
+
+    llm = _get_llm()
+    structured_llm = llm.with_structured_output(
+        schema=_LessonResponseType.model_json_schema(),
+        method="json_schema",
+    )
+
+    prompt = (
+        "You are classifying a learner's message during a micro-lesson on WhatsApp.\n\n"
+        f"Current lesson (excerpt):\n{lesson_content}\n\n"
+        f'Learner\'s message: "{user_response}"\n\n'
+        "Classify the message:\n"
+        "- lesson_answer: The learner is attempting to answer the comprehension check "
+        "or summarise what they understood (e.g. 'ML is when computers learn from data').\n"
+        "- question: The learner is asking a follow-up question about the topic "
+        "(e.g. 'what does supervised mean?', 'how is this used in real life?').\n"
+        "- more_detail: The learner wants more examples or a deeper explanation "
+        "(e.g. 'give me an example', 'explain more', 'tell me more about this').\n"
+        "- simplify_request: The learner is confused and wants a simpler version "
+        "(e.g. 'I don\'t get it', 'too complicated', 'explain it simpler', 'what?').\n"
+        "- skip: The learner wants to move on to the next lesson without answering "
+        "(e.g. 'next', 'skip', 'continue', 'move on', 'got it', 'I already know this')."
+    )
+
+    try:
+        result: dict = structured_llm.invoke(prompt)
+        response_type = result.get("response_type", "lesson_answer")
+    except Exception as exc:
+        logger.warning("classify_lesson_response failed (%s); defaulting to lesson_answer.", exc)
+        response_type = "lesson_answer"
+
+    logger.info("Lesson response classified: %s", response_type)
+    return {"lesson_response_type": response_type}
+
+
+async def tutor_respond(state: LearnaDoState) -> dict:
+    """Answer a follow-up question or provide more detail, like a real tutor."""
+    from app.whatsapp import send_message
+
+    phone = state["phone_number"]
+    user_response = state.get("user_response", "")
+    lesson_content = state.get("lesson_content", "")
+    sentiment = state.get("sentiment", "neutral")
+    sentiment_hint = _SENTIMENT_CONTEXT.get(sentiment, "")
+    response_type = state.get("lesson_response_type", "question")
+
+    if response_type == "more_detail":
+        task_instruction = (
+            "The learner wants more detail or examples. Provide a concrete, "
+            "relatable example and expand on the concept briefly."
+        )
+    else:
+        task_instruction = (
+            "The learner asked a question. Answer it directly and clearly, "
+            "relating it back to the lesson content."
+        )
+
+    system_prompt = (
+        "You are LearnaDo, a friendly micro-learning tutor on WhatsApp.\n"
+        "You are in the middle of teaching a lesson. The learner has a question or request.\n\n"
+        f"Current lesson content:\n{lesson_content[:1200]}\n\n"
+        f"{task_instruction}\n\n"
+        "Rules:\n"
+        "- Keep your reply concise (under 500 chars), conversational, WhatsApp-friendly.\n"
+        "- Use WhatsApp formatting: *bold*, _italic_.\n"
+        "- Be encouraging and patient.\n"
+        "- After answering, gently prompt them to share what they understood "
+        "from the lesson when they're ready.\n"
+    )
+    if sentiment_hint:
+        system_prompt += f"\n{sentiment_hint}\n"
+
+    trimmed = trim_messages(
+        state.get("messages", []),
+        strategy="last",
+        token_counter=count_tokens_approximately,
+        max_tokens=3000,
+        start_on="human",
+    )
+
+    llm = _get_llm()
+    response = llm.invoke([SystemMessage(content=system_prompt)] + trimmed)
+    reply = _extract_text(response) or "Great question! Let me think about that..."
+
+    await send_message(phone, reply)
+    return {"messages": [AIMessage(content=reply)]}
 
 
 async def evaluate_response(state: LearnaDoState) -> dict:
